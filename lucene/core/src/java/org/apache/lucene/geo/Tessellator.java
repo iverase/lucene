@@ -76,7 +76,6 @@ public final class Tessellator {
   /** state of the tessellated split - avoids recursion */
   private enum State {
     INIT,
-    CURE,
     SPLIT
   }
 
@@ -543,11 +542,6 @@ public final class Tessellator {
             case INIT:
               // try filtering points and slicing again
               currEar = filterPoints(currEar, null);
-              state = State.CURE;
-              continue earcut;
-            case CURE:
-              // if this didn't work, try curing all small self-intersections locally
-              currEar = cureLocalIntersections(currEar, tessellation, mortonOptimized);
               state = State.SPLIT;
               continue earcut;
             case SPLIT:
@@ -719,74 +713,6 @@ public final class Tessellator {
       n = n.nextZ;
     }
     return true;
-  }
-
-  /** Iterate through all polygon nodes and remove small local self-intersections * */
-  private static final Node cureLocalIntersections(
-      Node startNode, final Collector tessellation, final boolean mortonOptimized) {
-    Node node = startNode;
-    Node nextNode;
-    do {
-      nextNode = node.next;
-      Node a = node.previous;
-      Node b = nextNode.next;
-
-      // a self-intersection where edge (v[i-1],v[i]) intersects (v[i+1],v[i+2])
-      if (isVertexEquals(a, b) == false
-          && isIntersectingPolygon(a, a.getX(), a.getY(), b.getX(), b.getY()) == false
-          && linesIntersect(
-              a.getX(),
-              a.getY(),
-              node.getX(),
-              node.getY(),
-              nextNode.getX(),
-              nextNode.getY(),
-              b.getX(),
-              b.getY())
-          && isLocallyInside(a, b)
-          && isLocallyInside(b, a)) {
-        // compute edges from polygon
-        boolean abFromPolygon =
-            (a.next == node)
-                ? a.isNextEdgeFromPolygon
-                : isEdgeFromPolygon(a, node, mortonOptimized);
-        boolean bcFromPolygon =
-            (node.next == b)
-                ? node.isNextEdgeFromPolygon
-                : isEdgeFromPolygon(node, b, mortonOptimized);
-        boolean caFromPolygon =
-            (b.next == a) ? b.isNextEdgeFromPolygon : isEdgeFromPolygon(a, b, mortonOptimized);
-        tessellation.add(
-            a.getX(),
-            a.getY(),
-            abFromPolygon,
-            node.getX(),
-            node.getY(),
-            bcFromPolygon,
-            b.getX(),
-            b.getY(),
-            caFromPolygon);
-        // Return the triangulated vertices to the tessellation
-        tessellation.add(
-            a.getX(),
-            a.getY(),
-            abFromPolygon,
-            node.getX(),
-            node.getY(),
-            bcFromPolygon,
-            b.getX(),
-            b.getY(),
-            caFromPolygon);
-
-        // remove two nodes involved
-        removeNode(node, caFromPolygon);
-        removeNode(node.next, caFromPolygon);
-        node = startNode = b;
-      }
-      node = node.next;
-    } while (node != startNode);
-
-    return node;
   }
 
   /**
