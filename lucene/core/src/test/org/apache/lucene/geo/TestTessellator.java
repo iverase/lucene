@@ -19,7 +19,6 @@ package org.apache.lucene.geo;
 import static org.apache.lucene.geo.GeoTestUtil.nextBoxNotCrossingDateline;
 
 import java.text.ParseException;
-import java.util.List;
 import org.apache.lucene.util.LuceneTestCase;
 
 /** Test case for the Polygon {@link Tessellator} class */
@@ -64,7 +63,9 @@ public class TestTessellator extends LuceneTestCase {
             new double[] {-1.0, -1.0, 0.5, 1.0, 1.0, 0.5, -1.0},
             new double[] {-2.0, -4.0, -3.5, -4.0, -2.0, -2.5, -2.0});
     poly = new Polygon(poly.getPolyLats(), poly.getPolyLons(), inner, inner2);
-    assertTrue(Tessellator.tessellate(poly).size() > 0);
+    int[] count = new int[] {0};
+    Tessellator.tessellate(poly, (aX, aY, ab, bX, bY, bc, cX, cY, ca) -> count[0]++);
+    assertTrue(count[0] > 0);
   }
 
   @Nightly
@@ -79,7 +80,9 @@ public class TestTessellator extends LuceneTestCase {
             new double[] {-1.0, -1.0, 0.5, 1.0, 1.0, 0.5, -1.0},
             new double[] {-2.0, -4.0, -3.5, -4.0, -2.0, -2.5, -2.0});
     poly = new Polygon(poly.getPolyLats(), poly.getPolyLons(), inner, inner2);
-    assertTrue(Tessellator.tessellate(poly).size() > 0);
+    int[] count = new int[] {0};
+    Tessellator.tessellate(poly, (aX, aY, ab, bX, bY, bc, cX, cY, ca) -> count[0]++);
+    assertTrue(count[0] > 0);
   }
 
   public void testLUCENE8454() throws ParseException {
@@ -99,8 +102,7 @@ public class TestTessellator extends LuceneTestCase {
             + "[[168.1652103335658, -29.3030088541673], [168.16605788758287, -29.446580625201833], [168.16556735186845, -29.303245228857072], [168.165381, -29.303246], [168.16537977124085, -29.303008170411644], [168.1652103335658, -29.3030088541673]], "
             + "[[168.02088551865063, -29.647294313012004], [168.02133932508806, -29.811843292379823], [168.02135614030843, -29.811843274349446], [168.021356, -29.811809], [168.02162340579383, -29.811807949652078], [168.02088551865063, -29.647294313012004]]]}";
     Polygon[] polygons = Polygon.fromGeoJSON(geoJson);
-    List<Tessellator.Triangle> result = Tessellator.tessellate(polygons[0]);
-    assertEquals(result.size(), 84);
+    checkPolygon(polygons[0]);
   }
 
   public void testLUCENE8534() throws ParseException {
@@ -120,8 +122,7 @@ public class TestTessellator extends LuceneTestCase {
             + "[[168.71121460687698,-31.795031659971823],[168.71136127361123,-31.79503081865431],[168.71038567290682,-31.657182838382653],[168.71121460687698,-31.795031659971823]],"
             + "[[167.81624041598312,-31.53023516975434],[167.81634270442586,-31.530235525706665],[167.81676369867318,-31.434841665952604],[167.81624041598312,-31.53023516975434]]]}";
     Polygon[] polygons = Polygon.fromGeoJSON(geoJson);
-    List<Tessellator.Triangle> result = Tessellator.tessellate(polygons[0]);
-    assertEquals(113, result.size());
+    checkPolygon(polygons[0]);
   }
 
   public void testInvalidPolygon() throws Exception {
@@ -130,7 +131,7 @@ public class TestTessellator extends LuceneTestCase {
     expectThrows(
         IllegalArgumentException.class,
         () -> {
-          Tessellator.tessellate(polygon);
+          Tessellator.tessellate(polygon, new AssertingCollector(polygon));
         });
   }
 
@@ -138,7 +139,7 @@ public class TestTessellator extends LuceneTestCase {
     String wkt =
         "POLYGON((24.04725 59.942,24.04825 59.94125,24.04875 59.94125,24.04875 59.94175,24.048 59.9425,24.0475 59.94275,24.0465 59.94225,24.046 59.94225,24.04575 59.9425,24.04525 59.94225,24.04725 59.942))";
     Polygon polygon = (Polygon) SimpleWKTShapeParser.parse(wkt);
-    assertTrue(Tessellator.tessellate(polygon).size() == 8);
+    checkPolygon(polygon);
   }
 
   public void testLUCENE8559() throws Exception {
@@ -363,7 +364,7 @@ public class TestTessellator extends LuceneTestCase {
     expectThrows(
         IllegalArgumentException.class,
         () -> {
-          Tessellator.tessellate(polygon);
+          Tessellator.tessellate(polygon, new AssertingCollector(polygon));
         });
   }
 
@@ -376,7 +377,7 @@ public class TestTessellator extends LuceneTestCase {
     expectThrows(
         IllegalArgumentException.class,
         () -> {
-          Tessellator.tessellate(polygon);
+          Tessellator.tessellate(polygon, new AssertingCollector(polygon));
         });
   }
 
@@ -394,8 +395,7 @@ public class TestTessellator extends LuceneTestCase {
             + "((6.9731576 51.6249947,6.9731361 51.6250664,6.9731161 51.6251037,6.9731022 51.6250803,6.9731277 51.62502,6.9731576 51.6249947)))";
     Polygon[] polygons = (Polygon[]) SimpleWKTShapeParser.parse(wkt);
     for (Polygon polygon : polygons) {
-      List<Tessellator.Triangle> tessellation = Tessellator.tessellate(polygon);
-      assertTrue(tessellation.size() > 0);
+      checkPolygon(polygon);
     }
   }
 
@@ -646,12 +646,10 @@ public class TestTessellator extends LuceneTestCase {
   public void testComplexPolygon40() throws Exception {
     String wkt = GeoTestUtil.readShape("lucene-9251.wkt.gz");
     Polygon polygon = (Polygon) SimpleWKTShapeParser.parse(wkt);
-    List<Tessellator.Triangle> tessellation = Tessellator.tessellate(polygon);
+    AssertingCollector collector = new AssertingCollector(polygon);
+    Tessellator.tessellate(polygon, collector);
     // calculate the area of big polygons have numerical error
-    assertEquals(area(polygon), area(tessellation), 1e-12);
-    for (Tessellator.Triangle t : tessellation) {
-      checkTriangleEdgesFromPolygon(polygon, t);
-    }
+    assertEquals(area(polygon), collector.area, 1e-12);
   }
 
   public void testComplexPolygon41() throws Exception {
@@ -668,12 +666,10 @@ public class TestTessellator extends LuceneTestCase {
     String geoJson = GeoTestUtil.readShape("lucene-9417.geojson.gz");
     Polygon[] polygons = Polygon.fromGeoJSON(geoJson);
     for (int i = 0; i < polygons.length; i++) {
-      List<Tessellator.Triangle> tessellation = Tessellator.tessellate(polygons[i]);
+      AssertingCollector collector = new AssertingCollector(polygons[i]);
+      Tessellator.tessellate(polygons[i], collector);
       // calculate the area of big polygons have numerical error
-      assertEquals(area(polygons[i]), area(tessellation), 1e-11);
-      for (Tessellator.Triangle t : tessellation) {
-        checkTriangleEdgesFromPolygon(polygons[i], t);
-      }
+      assertEquals(area(polygons[i]), collector.area, 1e-11);
     }
   }
 
@@ -687,20 +683,20 @@ public class TestTessellator extends LuceneTestCase {
             + "(-88.3245325358123 41.9306419084828,-88.3245478066552 41.9305086556331,-88.3245658060855 41.930351580587,-88.3242368660096 41.9303327977821,-88.3242200926128 41.9304905242189,-88.324206161464 41.9306215207536,-88.3245325358123 41.9306419084828),"
             + "(-88.3236767661893 41.9307089429871,-88.3237008716322 41.930748885445,-88.323876104365 41.9306891087739,-88.324063438129 41.9306252050871,-88.3239244290607 41.930399373909,-88.3237349076233 41.9304653056436,-88.3235653339759 41.9305242981369,-88.3236767661893 41.9307089429871))";
     Polygon polygon = (Polygon) SimpleWKTShapeParser.parse(wkt);
-    List<Tessellator.Triangle> tessellation = Tessellator.tessellate(polygon);
-    assertEquals(area(polygon), area(tessellation), 1e-11);
-    for (Tessellator.Triangle t : tessellation) {
-      checkTriangleEdgesFromPolygon(polygon, t);
-    }
+    AssertingCollector collector = new AssertingCollector(polygon);
+    Tessellator.tessellate(polygon, collector);
+    assertEquals(area(polygon), collector.area, 1e-11);
   }
 
   private void checkPolygon(String wkt) throws Exception {
     Polygon polygon = (Polygon) SimpleWKTShapeParser.parse(wkt);
-    List<Tessellator.Triangle> tessellation = Tessellator.tessellate(polygon);
-    assertEquals(area(polygon), area(tessellation), 0.0);
-    for (Tessellator.Triangle t : tessellation) {
-      checkTriangleEdgesFromPolygon(polygon, t);
-    }
+    checkPolygon(polygon);
+  }
+
+  private void checkPolygon(Polygon polygon) {
+    AssertingCollector collector = new AssertingCollector(polygon);
+    Tessellator.tessellate(polygon, collector);
+    assertEquals(area(polygon), collector.area, 0.0);
   }
 
   private double area(Polygon p) {
@@ -715,122 +711,138 @@ public class TestTessellator extends LuceneTestCase {
     return area;
   }
 
-  private double area(List<Tessellator.Triangle> triangles) {
+  private static class AssertingCollector implements Tessellator.Collector {
+
     double area = 0;
-    for (Tessellator.Triangle t : triangles) {
-      double[] lats = new double[] {t.getY(0), t.getY(1), t.getY(2), t.getY(0)};
-      double[] lons = new double[] {t.getX(0), t.getX(1), t.getX(2), t.getX(0)};
-      area += area(new Polygon(lats, lons));
-    }
-    return area;
-  }
+    int count = 0;
+    final Polygon polygon;
 
-  private void checkTriangleEdgesFromPolygon(Polygon p, Tessellator.Triangle t) {
-    // first edge
-    assertEquals(
-        t.isEdgefromPolygon(0), isEdgeFromPolygon(p, t.getX(0), t.getY(0), t.getX(1), t.getY(1)));
-    // second edge
-    assertEquals(
-        t.isEdgefromPolygon(1), isEdgeFromPolygon(p, t.getX(1), t.getY(1), t.getX(2), t.getY(2)));
-    // third edge
-    assertEquals(
-        t.isEdgefromPolygon(2), isEdgeFromPolygon(p, t.getX(2), t.getY(2), t.getX(0), t.getY(0)));
-  }
-
-  private boolean isEdgeFromPolygon(Polygon p, double aLon, double aLat, double bLon, double bLat) {
-    for (int i = 0; i < p.getPolyLats().length - 1; i++) {
-      if (isPointInLine(
-              p.getPolyLon(i),
-              p.getPolyLat(i),
-              p.getPolyLon(i + 1),
-              p.getPolyLat(i + 1),
-              aLon,
-              aLat)
-          && isPointInLine(
-              p.getPolyLon(i),
-              p.getPolyLat(i),
-              p.getPolyLon(i + 1),
-              p.getPolyLat(i + 1),
-              bLon,
-              bLat)) {
-        return true;
-      }
-      if (p.getPolyLon(i) != p.getPolyLon(i + 1) || p.getPolyLat(i) != p.getPolyLat(i + 1)) {
-        // Check for co-planar points
-        final int length = p.getPolyLats().length;
-        final int offset = i + 2;
-        int j = 0;
-        int index = getIndex(length, j + offset);
-        while (j < length
-            && area(
-                    p.getPolyLon(i),
-                    p.getPolyLat(i),
-                    p.getPolyLon(i + 1),
-                    p.getPolyLat(i + 1),
-                    p.getPolyLon(index),
-                    p.getPolyLat(index))
-                == 0) {
-          if (isPointInLine(
-                  p.getPolyLon(i),
-                  p.getPolyLat(i),
-                  p.getPolyLon(index),
-                  p.getPolyLat(index),
-                  aLon,
-                  aLat)
-              && isPointInLine(
-                  p.getPolyLon(i),
-                  p.getPolyLat(i),
-                  p.getPolyLon(index),
-                  p.getPolyLat(index),
-                  bLon,
-                  bLat)) {
-            return true;
-          }
-          index = getIndex(length, ++j + offset);
-        }
-      }
+    AssertingCollector(Polygon polygon) {
+      this.polygon = polygon;
     }
-    if (p.getHoles() != null && p.getHoles().length > 0) {
-      for (Polygon hole : p.getHoles()) {
-        if (isEdgeFromPolygon(hole, aLon, aLat, bLon, bLat)) {
+
+    @Override
+    public void add(
+        double aX,
+        double aY,
+        boolean ab,
+        double bX,
+        double bY,
+        boolean bc,
+        double cX,
+        double cY,
+        boolean ca) {
+      count++;
+      area += Math.abs((aX * bY) - (aY * bX) + (bX * cY) - (bY * cX) + (cX * aY) - (cY * aX)) / 2.;
+      // first edge
+      assertEquals(ab, isEdgeFromPolygon(polygon, aX, aY, bX, bY));
+      // second edge
+      assertEquals(bc, isEdgeFromPolygon(polygon, bX, bY, cX, cY));
+      // third edge
+      assertEquals(ca, isEdgeFromPolygon(polygon, cX, cY, aX, aY));
+    }
+
+    private static boolean isEdgeFromPolygon(
+        Polygon p, double aLon, double aLat, double bLon, double bLat) {
+      for (int i = 0; i < p.getPolyLats().length - 1; i++) {
+        if (isPointInLine(
+                p.getPolyLon(i),
+                p.getPolyLat(i),
+                p.getPolyLon(i + 1),
+                p.getPolyLat(i + 1),
+                aLon,
+                aLat)
+            && isPointInLine(
+                p.getPolyLon(i),
+                p.getPolyLat(i),
+                p.getPolyLon(i + 1),
+                p.getPolyLat(i + 1),
+                bLon,
+                bLat)) {
           return true;
         }
+        if (p.getPolyLon(i) != p.getPolyLon(i + 1) || p.getPolyLat(i) != p.getPolyLat(i + 1)) {
+          // Check for co-planar points
+          final int length = p.getPolyLats().length;
+          final int offset = i + 2;
+          int j = 0;
+          int index = getIndex(length, j + offset);
+          while (j < length
+              && area(
+                      p.getPolyLon(i),
+                      p.getPolyLat(i),
+                      p.getPolyLon(i + 1),
+                      p.getPolyLat(i + 1),
+                      p.getPolyLon(index),
+                      p.getPolyLat(index))
+                  == 0) {
+            if (isPointInLine(
+                    p.getPolyLon(i),
+                    p.getPolyLat(i),
+                    p.getPolyLon(index),
+                    p.getPolyLat(index),
+                    aLon,
+                    aLat)
+                && isPointInLine(
+                    p.getPolyLon(i),
+                    p.getPolyLat(i),
+                    p.getPolyLon(index),
+                    p.getPolyLat(index),
+                    bLon,
+                    bLat)) {
+              return true;
+            }
+            index = getIndex(length, ++j + offset);
+          }
+        }
       }
+      if (p.getHoles() != null && p.getHoles().length > 0) {
+        for (Polygon hole : p.getHoles()) {
+          if (isEdgeFromPolygon(hole, aLon, aLat, bLon, bLat)) {
+            return true;
+          }
+        }
+      }
+      return false;
     }
-    return false;
-  }
 
-  private int getIndex(int size, int index) {
-    if (index < size) {
-      return index;
+    private static int getIndex(int size, int index) {
+      if (index < size) {
+        return index;
+      }
+      return index - size;
     }
-    return index - size;
-  }
 
-  /** Compute signed area of triangle */
-  private double area(
-      final double aX,
-      final double aY,
-      final double bX,
-      final double bY,
-      final double cX,
-      final double cY) {
-    return (bY - aY) * (cX - bX) - (bX - aX) * (cY - bY);
-  }
-
-  private boolean isPointInLine(
-      final double aX, final double aY, final double bX, final double bY, double lon, double lat) {
-    double dxc = lon - aX;
-    double dyc = lat - aY;
-
-    double dxl = bX - aX;
-    double dyl = bY - aY;
-
-    if (dxc * dyl - dyc * dxl == 0) {
-      if (Math.abs(dxl) >= Math.abs(dyl))
-        return dxl > 0 ? aX <= lon && lon <= bX : bX <= lon && lon <= aX;
-      else return dyl > 0 ? aY <= lat && lat <= bY : bY <= lat && lat <= aY;
+    /** Compute signed area of triangle */
+    private static double area(
+        final double aX,
+        final double aY,
+        final double bX,
+        final double bY,
+        final double cX,
+        final double cY) {
+      return (bY - aY) * (cX - bX) - (bX - aX) * (cY - bY);
     }
-    return false;
+
+    private static boolean isPointInLine(
+        final double aX,
+        final double aY,
+        final double bX,
+        final double bY,
+        double lon,
+        double lat) {
+      double dxc = lon - aX;
+      double dyc = lat - aY;
+
+      double dxl = bX - aX;
+      double dyl = bY - aY;
+
+      if (dxc * dyl - dyc * dxl == 0) {
+        if (Math.abs(dxl) >= Math.abs(dyl))
+          return dxl > 0 ? aX <= lon && lon <= bX : bX <= lon && lon <= aX;
+        else return dyl > 0 ? aY <= lat && lat <= bY : bY <= lat && lat <= aY;
+      }
+      return false;
+    }
   }
 }
