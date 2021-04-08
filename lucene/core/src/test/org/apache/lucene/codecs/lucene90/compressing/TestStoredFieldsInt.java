@@ -26,50 +26,50 @@ import org.apache.lucene.util.TestUtil;
 
 public class TestStoredFieldsInt extends LuceneTestCase {
 
-    public void testRandom() throws Exception {
-        int numIters = atLeast(100);
-        try (Directory dir = newDirectory()) {
-            for (int iter = 0; iter < numIters; ++iter) {
-                int[] values = new int[random().nextInt(5000) + 1];
-                final int bpv = TestUtil.nextInt(random(), 1, 31);
-                for (int i = 0; i < values.length; ++i) {
-                    values[i] = TestUtil.nextInt(random(), 0, (1 << bpv) - 1);
-                }
-                test(dir, values);
-            }
+  public void testRandom() throws Exception {
+    int numIters = atLeast(100);
+    try (Directory dir = newDirectory()) {
+      for (int iter = 0; iter < numIters; ++iter) {
+        int[] values = new int[random().nextInt(5000) + 1];
+        final int bpv = TestUtil.nextInt(random(), 1, 31);
+        for (int i = 0; i < values.length; ++i) {
+          values[i] = TestUtil.nextInt(random(), 0, (1 << bpv) - 1);
         }
+        test(dir, values);
+      }
+    }
+  }
+
+  public void testAllEquals() throws Exception {
+    try (Directory dir = newDirectory()) {
+      int[] docIDs = new int[random().nextInt(5000) + 1];
+      final int bpv = TestUtil.nextInt(random(), 1, 31);
+      Arrays.fill(docIDs, TestUtil.nextInt(random(), 0, (1 << bpv) - 1));
+      test(dir, docIDs);
+    }
+  }
+
+  private void test(Directory dir, int[] ints) throws Exception {
+    final long len;
+    try (IndexOutput out = dir.createOutput("tmp", IOContext.DEFAULT)) {
+      StoredFieldsInts.writeInts(ints, 0, ints.length, out);
+      len = out.getFilePointer();
+      if (random().nextBoolean()) {
+        out.writeLong(0); // garbage
+      }
     }
 
-    public void testAllEquals() throws Exception {
-        try (Directory dir = newDirectory()) {
-            int[] docIDs = new int[random().nextInt(5000) + 1];
-            final int bpv = TestUtil.nextInt(random(), 1, 31);
-            Arrays.fill(docIDs, TestUtil.nextInt(random(), 0, (1 << bpv) - 1));
-            test(dir, docIDs);
-        }
+    try (IndexInput in = dir.openInput("tmp", IOContext.READONCE)) {
+      final int offset = random().nextInt(5);
+      long[] read = new long[ints.length + offset];
+      StoredFieldsInts.readInts(in, ints.length, read, offset);
+      int[] readInts = new int[ints.length];
+      for (int i = 0; i < ints.length; i++) {
+        readInts[i] = (int) read[offset + i];
+      }
+      assertArrayEquals(ints, readInts);
+      assertEquals(len, in.getFilePointer());
     }
-
-    private void test(Directory dir, int[] ints) throws Exception {
-        final long len;
-        try (IndexOutput out = dir.createOutput("tmp", IOContext.DEFAULT)) {
-            StoredFieldsInts.writeInts(ints, 0, ints.length, out);
-            len = out.getFilePointer();
-            if (random().nextBoolean()) {
-                out.writeLong(0); // garbage
-            }
-        }
-
-        try (IndexInput in = dir.openInput("tmp", IOContext.READONCE)) {
-            final int offset = random().nextInt(5);
-            long[] read = new long[ints.length + offset];
-            StoredFieldsInts.readInts(in, ints.length, read, offset);
-            int[] readInts = new int[ints.length];
-            for (int i = 0; i < ints.length; i++) {
-                readInts[i] = (int) read[offset + i];
-            }
-            assertArrayEquals(ints, readInts);
-            assertEquals(len, in.getFilePointer());
-        }
-        dir.deleteFile("tmp");
-    }
+    dir.deleteFile("tmp");
+  }
 }

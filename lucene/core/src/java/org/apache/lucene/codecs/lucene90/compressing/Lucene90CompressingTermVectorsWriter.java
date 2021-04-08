@@ -479,8 +479,9 @@ public final class Lucene90CompressingTermVectorsWriter extends TermVectorsWrite
   }
 
   private void flushFields(int totalFields, int[] fieldNums) throws IOException {
-    final DirectWriter writer = 
-            DirectWriter.getInstance(vectorsStream, totalFields, DirectWriter.bitsRequired(fieldNums.length - 1));
+    final DirectWriter writer =
+        DirectWriter.getInstance(
+            vectorsStream, totalFields, DirectWriter.bitsRequired(fieldNums.length - 1));
     for (DocData dd : pendingDocs) {
       for (FieldData fd : dd.fields) {
         final int fieldNumIndex = Arrays.binarySearch(fieldNums, fd.fieldNum);
@@ -513,7 +514,8 @@ public final class Lucene90CompressingTermVectorsWriter extends TermVectorsWrite
     if (nonChangingFlags) {
       // write one flag per field num
       vectorsStream.writeVInt(0);
-      final DirectWriter writer = DirectWriter.getInstance(vectorsStream, fieldFlags.length, FLAGS_BITS);
+      final DirectWriter writer =
+          DirectWriter.getInstance(vectorsStream, fieldFlags.length, FLAGS_BITS);
       for (int flags : fieldFlags) {
         assert flags >= 0;
         writer.add(flags);
@@ -541,7 +543,7 @@ public final class Lucene90CompressingTermVectorsWriter extends TermVectorsWrite
     }
     final int bitsRequired = DirectWriter.bitsRequired(maxNumTerms);
     vectorsStream.writeVInt(bitsRequired);
-    final DirectWriter writer  = DirectWriter.getInstance(vectorsStream, totalFields, bitsRequired);
+    final DirectWriter writer = DirectWriter.getInstance(vectorsStream, totalFields, bitsRequired);
     for (DocData dd : pendingDocs) {
       for (FieldData fd : dd.fields) {
         writer.add(fd.numTerms);
