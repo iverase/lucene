@@ -68,6 +68,7 @@ public final class BKDPointValues extends PointValues {
       visitor.grow(Integer.MAX_VALUE);
       maxPointCount -= Integer.MAX_VALUE;
     }
+    visitor.grow((int) maxPointCount);
     index.visitDocIDs(visitor);
   }
 
