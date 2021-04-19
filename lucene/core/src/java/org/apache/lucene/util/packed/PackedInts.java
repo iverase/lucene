@@ -505,20 +505,6 @@ public class PackedInts {
       fill(0, size(), 0);
     }
 
-    /**
-     * Save this mutable into <code>out</code>. Instantiating a reader from the generated data will
-     * return a reader with the same number of bits per value.
-     */
-    public void save(DataOutput out) throws IOException {
-      Writer writer =
-          getWriterNoHeader(out, getFormat(), size(), getBitsPerValue(), DEFAULT_BUFFER_SIZE);
-      writer.writeHeader();
-      for (int i = 0; i < size(); ++i) {
-        writer.add(get(i));
-      }
-      writer.finish();
-    }
-
     /** The underlying format. */
     Format getFormat() {
       return Format.PACKED;
