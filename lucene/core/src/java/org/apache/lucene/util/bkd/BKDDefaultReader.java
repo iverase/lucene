@@ -149,6 +149,22 @@ public class BKDDefaultReader implements BKDReader {
         minPackedValue,
         maxPackedValue);
   }
+  
+  private static class ScratchObjects {
+
+    private final byte[] scratchDataPackedValue, scratchMinIndexPackedValue, scratchMaxIndexPackedValue;
+    private final int[] commonPrefixLengths;
+    private final BKDReaderDocIDSetIterator scratchIterator;
+    
+    public ScratchObjects(BKDConfig config) {
+      this.scratchIterator =  new BKDReaderDocIDSetIterator(config.maxPointsInLeafNode);
+      this.commonPrefixLengths = new int[config.numDims];
+      this.scratchDataPackedValue = new byte[config.packedBytesLength];
+      this.scratchMinIndexPackedValue =  new byte[config.packedIndexBytesLength];
+      this.scratchMaxIndexPackedValue = new byte[config.packedIndexBytesLength];
+    }
+    
+  }
 
   private static class IndexTree implements BKDReader.IndexTree {
     private int nodeID;
@@ -184,12 +200,8 @@ public class BKDDefaultReader implements BKDReader {
     private final int leafNodeOffset;
     // version of the index
     private final int version;
-    // helper objects for reading doc values
-    private final byte[] scratchDataPackedValue,
-        scratchMinIndexPackedValue,
-        scratchMaxIndexPackedValue;
-    private final int[] commonPrefixLengths;
-    private final BKDReaderDocIDSetIterator scratchIterator;
+    // helper object for reading doc values
+    private final ScratchObjects scratcObjects;
 
     private IndexTree(
         IndexInput innerNodes,
@@ -210,11 +222,8 @@ public class BKDDefaultReader implements BKDReader {
           1,
           minPackedValue,
           maxPackedValue,
-          new BKDReaderDocIDSetIterator(config.maxPointsInLeafNode),
-          new byte[config.packedBytesLength],
-          new byte[config.packedIndexBytesLength],
-          new byte[config.packedIndexBytesLength],
-          new int[config.numDims]);
+          new ScratchObjects(config)
+      );
       // read root node
       readNodeData(false);
     }
@@ -229,11 +238,7 @@ public class BKDDefaultReader implements BKDReader {
         int level,
         byte[] minPackedValue,
         byte[] maxPackedValue,
-        BKDReaderDocIDSetIterator scratchIterator,
-        byte[] scratchDataPackedValue,
-        byte[] scratchMinIndexPackedValue,
-        byte[] scratchMaxIndexPackedValue,
-        int[] commonPrefixLengths) {
+        ScratchObjects scratchObjects) {
       this.config = config;
       this.version = version;
       this.nodeID = nodeID;
@@ -255,11 +260,7 @@ public class BKDDefaultReader implements BKDReader {
       negativeDeltas = new boolean[config.numIndexDims * (treeDepth + 1)];
       // scratch objects, reused between clones so NN search are not creating those objects
       // in every clone.
-      this.scratchIterator = scratchIterator;
-      this.commonPrefixLengths = commonPrefixLengths;
-      this.scratchDataPackedValue = scratchDataPackedValue;
-      this.scratchMinIndexPackedValue = scratchMinIndexPackedValue;
-      this.scratchMaxIndexPackedValue = scratchMaxIndexPackedValue;
+      this.scratcObjects = scratchObjects;
     }
 
     @Override
@@ -275,11 +276,7 @@ public class BKDDefaultReader implements BKDReader {
               level,
               minPackedValue,
               maxPackedValue,
-              scratchIterator,
-              scratchDataPackedValue,
-              scratchMinIndexPackedValue,
-              scratchMaxIndexPackedValue,
-              commonPrefixLengths);
+              scratcObjects);
       index.leafBlockFPStack[index.level] = leafBlockFPStack[level];
       if (isLeafNode() == false) {
         // copy node data
@@ -477,25 +474,25 @@ public class BKDDefaultReader implements BKDReader {
 
     private void visitDocValues(PointValues.IntersectVisitor visitor, long fp) throws IOException {
       // Leaf node; scan and filter all points in this block:
-      int count = readDocIDs(leafNodes, fp, scratchIterator);
+      int count = readDocIDs(leafNodes, fp, scratcObjects.scratchIterator);
       if (version >= BKDWriter.VERSION_LOW_CARDINALITY_LEAVES) {
         visitDocValuesWithCardinality(
-            commonPrefixLengths,
-            scratchDataPackedValue,
-            scratchMinIndexPackedValue,
-            scratchMaxIndexPackedValue,
+                scratcObjects.commonPrefixLengths,
+                scratcObjects.scratchDataPackedValue,
+                scratcObjects.scratchMinIndexPackedValue,
+                scratcObjects.scratchMaxIndexPackedValue,
             leafNodes,
-            scratchIterator,
+                scratcObjects.scratchIterator,
             count,
             visitor);
       } else {
         visitDocValuesNoCardinality(
-            commonPrefixLengths,
-            scratchDataPackedValue,
-            scratchMinIndexPackedValue,
-            scratchMaxIndexPackedValue,
+                scratcObjects.commonPrefixLengths,
+                scratcObjects.scratchDataPackedValue,
+                scratcObjects.scratchMinIndexPackedValue,
+                scratcObjects.scratchMaxIndexPackedValue,
             leafNodes,
-            scratchIterator,
+                scratcObjects.scratchIterator,
             count,
             visitor);
       }
