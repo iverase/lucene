@@ -37,6 +37,7 @@ public class BKDDefaultReader implements BKDReader {
   final int numLeaves;
   // Packed array of byte[] holding all docs and values:
   final IndexInput in;
+  
   final byte[] minPackedValue;
   final byte[] maxPackedValue;
   final long pointCount;
@@ -143,9 +144,6 @@ public class BKDDefaultReader implements BKDReader {
     return new IndexTree(
         packedIndex.clone(),
         this.in,
-        config,
-        numLeaves,
-        version,
         minPackedValue,
         maxPackedValue);
   }
@@ -166,7 +164,7 @@ public class BKDDefaultReader implements BKDReader {
     
   }
 
-  private static class IndexTree implements BKDReader.IndexTree {
+  private class IndexTree implements BKDReader.IndexTree {
     private int nodeID;
     // during clone, the node root can be different to 1
     private final int nodeRoot;
@@ -174,8 +172,6 @@ public class BKDDefaultReader implements BKDReader {
     private int level;
     // used to read the packed tree off-heap
     private final IndexInput innerNodes;
-    // used to read the packed leaves off-heap
-    private final IndexInput leafNodes;
     // holds the minimum (left most) leaf block file pointer for each level we've recursed to:
     private final long[] leafBlockFPStack;
     // holds the address, in the off-heap index, of the right-node of each level:
@@ -194,30 +190,17 @@ public class BKDDefaultReader implements BKDReader {
     private final byte[] minPackedValue, maxPackedValue;
     // holds the previous value of the split dimension
     private final byte[][] splitDimValueStack;
-    // tree parameters
-    private final BKDConfig config;
-    // number of leaves
-    private final int leafNodeOffset;
-    // version of the index
-    private final int version;
     // helper object for reading doc values
     private final ScratchObjects scratcObjects;
 
     private IndexTree(
         IndexInput innerNodes,
         IndexInput leafNodes,
-        BKDConfig config,
-        int numLeaves,
-        int version,
         byte[] minPackedValue,
         byte[] maxPackedValue)
         throws IOException {
       this(
           innerNodes,
-          leafNodes,
-          config,
-          numLeaves,
-          version,
           1,
           1,
           minPackedValue,
@@ -230,23 +213,15 @@ public class BKDDefaultReader implements BKDReader {
 
     private IndexTree(
         IndexInput innerNodes,
-        IndexInput leafNodes,
-        BKDConfig config,
-        int numLeaves,
-        int version,
         int nodeID,
         int level,
         byte[] minPackedValue,
         byte[] maxPackedValue,
         ScratchObjects scratchObjects) {
-      this.config = config;
-      this.version = version;
       this.nodeID = nodeID;
       this.nodeRoot = nodeID;
       this.level = level;
-      leafNodeOffset = numLeaves;
       this.innerNodes = innerNodes;
-      this.leafNodes = leafNodes;
       this.minPackedValue = minPackedValue.clone();
       this.maxPackedValue = maxPackedValue.clone();
       // stack arrays that keep information at different levels
@@ -268,17 +243,13 @@ public class BKDDefaultReader implements BKDReader {
       BKDDefaultReader.IndexTree index =
           new BKDDefaultReader.IndexTree(
               innerNodes.clone(),
-              leafNodes,
-              config,
-              leafNodeOffset,
-              version,
               nodeID,
               level,
               minPackedValue,
               maxPackedValue,
               scratcObjects);
       index.leafBlockFPStack[index.level] = leafBlockFPStack[level];
-      //if (isLeafNode() == false) {
+      if (isLeafNode() == false) {
         // copy node data
         index.rightNodePositions[index.level] = rightNodePositions[level];
         index.splitValuesStack[index.level] = splitValuesStack[level].clone();
@@ -289,7 +260,7 @@ public class BKDDefaultReader implements BKDReader {
             level * config.numIndexDims,
             config.numIndexDims);
         index.splitDimsPos[level] = splitDimsPos[level];
-      //}
+      }
       return index;
     }
 
@@ -412,11 +383,11 @@ public class BKDDefaultReader implements BKDReader {
     }
 
     private boolean isLeafNode() {
-      return nodeID >= leafNodeOffset;
+      return nodeID >= numLeaves;
     }
 
     private boolean nodeExists() {
-      return nodeID - leafNodeOffset < leafNodeOffset;
+      return nodeID - numLeaves < numLeaves;
     }
 
     /** Only valid after pushLeft or pushRight, not pop! */
@@ -428,23 +399,23 @@ public class BKDDefaultReader implements BKDReader {
     @Override
     public long size() {
       int leftMostLeafNode = nodeID;
-      while (leftMostLeafNode < leafNodeOffset) {
+      while (leftMostLeafNode < numLeaves) {
         leftMostLeafNode = leftMostLeafNode * 2;
       }
       int rightMostLeafNode = nodeID;
-      while (rightMostLeafNode < leafNodeOffset) {
+      while (rightMostLeafNode < numLeaves) {
         rightMostLeafNode = rightMostLeafNode * 2 + 1;
       }
-      final int numLeaves;
+      final int numLeaves2;
       if (rightMostLeafNode >= leftMostLeafNode) {
         // both are on the same level
-        numLeaves = rightMostLeafNode - leftMostLeafNode + 1;
+        numLeaves2 = rightMostLeafNode - leftMostLeafNode + 1;
       } else {
         // left is one level deeper than right
-        numLeaves = rightMostLeafNode - leftMostLeafNode + 1 + leafNodeOffset;
+        numLeaves2 = rightMostLeafNode - leftMostLeafNode + 1 + numLeaves;
       }
-      assert numLeaves == getNumLeavesSlow(nodeID) : numLeaves + " " + getNumLeavesSlow(nodeID);
-      return (long) numLeaves * config.maxPointsInLeafNode;
+      assert numLeaves2 == getNumLeavesSlow(nodeID) : numLeaves2 + " " + getNumLeavesSlow(nodeID);
+      return (long) numLeaves2 * config.maxPointsInLeafNode;
     }
 
     @Override
@@ -452,10 +423,10 @@ public class BKDDefaultReader implements BKDReader {
       if (isLeafNode()) {
         // TODO: we can assert that the first value here in fact matches what the index claimed?
         // Leaf node
-        leafNodes.seek(getLeafBlockFP());
+        in.seek(getLeafBlockFP());
         // How many points are stored in this leaf cell:
-        final int count = leafNodes.readVInt();
-        DocIdsWriter.readInts(leafNodes, count, visitor);
+        final int count = in.readVInt();
+        DocIdsWriter.readInts(in, count, visitor);
       } else {
         final int splitDimPos = splitDimsPos[level];
         pushLeft(splitDimPos);
@@ -474,14 +445,14 @@ public class BKDDefaultReader implements BKDReader {
 
     private void visitDocValues(PointValues.IntersectVisitor visitor, long fp) throws IOException {
       // Leaf node; scan and filter all points in this block:
-      int count = readDocIDs(leafNodes, fp, scratcObjects.scratchIterator);
+      int count = readDocIDs(in, fp, scratcObjects.scratchIterator);
       if (version >= BKDWriter.VERSION_LOW_CARDINALITY_LEAVES) {
         visitDocValuesWithCardinality(
                 scratcObjects.commonPrefixLengths,
                 scratcObjects.scratchDataPackedValue,
                 scratcObjects.scratchMinIndexPackedValue,
                 scratcObjects.scratchMaxIndexPackedValue,
-            leafNodes,
+                in,
                 scratcObjects.scratchIterator,
             count,
             visitor);
@@ -491,7 +462,7 @@ public class BKDDefaultReader implements BKDReader {
                 scratcObjects.scratchDataPackedValue,
                 scratcObjects.scratchMinIndexPackedValue,
                 scratcObjects.scratchMaxIndexPackedValue,
-            leafNodes,
+                in,
                 scratcObjects.scratchIterator,
             count,
             visitor);
@@ -511,9 +482,9 @@ public class BKDDefaultReader implements BKDReader {
 
     // for assertions
     private int getNumLeavesSlow(int node) {
-      if (node >= 2 * leafNodeOffset) {
+      if (node >= 2 * numLeaves) {
         return 0;
-      } else if (node >= leafNodeOffset) {
+      } else if (node >= numLeaves) {
         return 1;
       } else {
         final int leftCount = getNumLeavesSlow(node * 2);
@@ -576,7 +547,7 @@ public class BKDDefaultReader implements BKDReader {
         }
 
         int leftNumBytes;
-        if (nodeID * 2 < leafNodeOffset) {
+        if (nodeID * 2 < numLeaves) {
           leftNumBytes = innerNodes.readVInt();
         } else {
           leftNumBytes = 0;
