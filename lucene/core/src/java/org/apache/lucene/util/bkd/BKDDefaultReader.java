@@ -278,7 +278,7 @@ public class BKDDefaultReader implements BKDReader {
               maxPackedValue,
               scratcObjects);
       index.leafBlockFPStack[index.level] = leafBlockFPStack[level];
-      if (isLeafNode() == false) {
+      //if (isLeafNode() == false) {
         // copy node data
         index.rightNodePositions[index.level] = rightNodePositions[level];
         index.splitValuesStack[index.level] = splitValuesStack[level].clone();
@@ -289,7 +289,7 @@ public class BKDDefaultReader implements BKDReader {
             level * config.numIndexDims,
             config.numIndexDims);
         index.splitDimsPos[level] = splitDimsPos[level];
-      }
+      //}
       return index;
     }
 
