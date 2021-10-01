@@ -267,7 +267,7 @@ public class BKDDefaultReader implements BKDReader {
       BKDDefaultReader.IndexTree index =
           new BKDDefaultReader.IndexTree(
               innerNodes.clone(),
-              leafNodes.clone(),
+              leafNodes, // doggy...
               config,
               leafNodeOffset,
               version,
