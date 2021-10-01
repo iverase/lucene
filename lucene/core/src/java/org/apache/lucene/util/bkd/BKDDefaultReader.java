@@ -142,7 +142,7 @@ public class BKDDefaultReader implements BKDReader {
   public BKDReader.IndexTree getIndexTree() throws IOException {
     return new IndexTree(
         packedIndex.clone(),
-        this.in.clone(),
+        this.in,
         config,
         numLeaves,
         version,
@@ -268,7 +268,7 @@ public class BKDDefaultReader implements BKDReader {
       BKDDefaultReader.IndexTree index =
           new BKDDefaultReader.IndexTree(
               innerNodes.clone(),
-              leafNodes.clone(),
+              leafNodes,
               config,
               leafNodeOffset,
               version,
