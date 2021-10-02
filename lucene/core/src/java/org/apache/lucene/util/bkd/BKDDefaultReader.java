@@ -311,27 +311,28 @@ public class BKDDefaultReader implements BKDReader {
       if (isLeafNode()) {
         return false;
       }
+      pushBoundsLeft();
       pushLeft();
       return true;
     }
 
-    private void pushLeft() throws IOException {
+    private void pushBoundsLeft() {
       final int splitDimPos = splitDimsPos[level];
       if (splitDimValueStack[level] == null) {
         splitDimValueStack[level] = new byte[config.bytesPerDim];
       }
       // save the dimension we are going to change
       System.arraycopy(
-          maxPackedValue, splitDimPos, splitDimValueStack[level], 0, config.bytesPerDim);
+              maxPackedValue, splitDimPos, splitDimValueStack[level], 0, config.bytesPerDim);
       assert Arrays.compareUnsigned(
-                  maxPackedValue,
-                  splitDimPos,
-                  splitDimPos + config.bytesPerDim,
-                  splitValuesStack[level],
-                  splitDimPos,
-                  splitDimPos + config.bytesPerDim)
+              maxPackedValue,
+              splitDimPos,
+              splitDimPos + config.bytesPerDim,
+              splitValuesStack[level],
+              splitDimPos,
+              splitDimPos + config.bytesPerDim)
               >= 0
-          : "config.bytesPerDim="
+              : "config.bytesPerDim="
               + config.bytesPerDim
               + " splitDimPos="
               + splitDimsPos[level]
@@ -341,28 +342,32 @@ public class BKDDefaultReader implements BKDReader {
               + config.numDims;
       // add the split dim value:
       System.arraycopy(
-          splitValuesStack[level], splitDimPos, maxPackedValue, splitDimPos, config.bytesPerDim);
+              splitValuesStack[level], splitDimPos, maxPackedValue, splitDimPos, config.bytesPerDim);
+    }
+      
+
+    private void pushLeft() throws IOException {
       nodeID *= 2;
       level++;
       readNodeData(true);
     }
 
-    private void pushRight() throws IOException {
+    private void pushBoundsRight() {
       final int splitDimPos = splitDimsPos[level];
       // we should have already visit the left node
       assert splitDimValueStack[level] != null;
       // save the dimension we are going to change
       System.arraycopy(
-          minPackedValue, splitDimPos, splitDimValueStack[level], 0, config.bytesPerDim);
+              minPackedValue, splitDimPos, splitDimValueStack[level], 0, config.bytesPerDim);
       assert Arrays.compareUnsigned(
-                  minPackedValue,
-                  splitDimPos,
-                  splitDimPos + config.bytesPerDim,
-                  splitValuesStack[level],
-                  splitDimPos,
-                  splitDimPos + config.bytesPerDim)
+              minPackedValue,
+              splitDimPos,
+              splitDimPos + config.bytesPerDim,
+              splitValuesStack[level],
+              splitDimPos,
+              splitDimPos + config.bytesPerDim)
               <= 0
-          : "config.bytesPerDim="
+              : "config.bytesPerDim="
               + config.bytesPerDim
               + " splitDimPos="
               + splitDimsPos[level]
@@ -370,13 +375,16 @@ public class BKDDefaultReader implements BKDReader {
               + config.numIndexDims
               + " config.numDims="
               + config.numDims;
-      final int nodePosition = rightNodePositions[level];
-      assert nodePosition >= innerNodes.getFilePointer()
-          : "nodePosition = " + nodePosition + " < currentPosition=" + innerNodes.getFilePointer();
-      innerNodes.seek(nodePosition);
       // add the split dim value:
       System.arraycopy(
-          splitValuesStack[level], splitDimPos, minPackedValue, splitDimPos, config.bytesPerDim);
+              splitValuesStack[level], splitDimPos, minPackedValue, splitDimPos, config.bytesPerDim);  
+    }
+    
+    private void pushRight() throws IOException {
+      final int nodePosition = rightNodePositions[level];
+      assert nodePosition >= innerNodes.getFilePointer()
+              : "nodePosition = " + nodePosition + " < currentPosition=" + innerNodes.getFilePointer();
+      innerNodes.seek(nodePosition);
       nodeID = 2 * nodeID + 1;
       level++;
       readNodeData(false);
@@ -385,7 +393,9 @@ public class BKDDefaultReader implements BKDReader {
     @Override
     public boolean moveToSibling() throws IOException {
       if (nodeID != nodeRoot && (nodeID & 1) == 0) {
-        pop(maxPackedValue);
+        pop();
+        popBounds(maxPackedValue);
+        pushBoundsRight();
         pushRight();
         assert nodeExists();
         return true;
@@ -393,12 +403,16 @@ public class BKDDefaultReader implements BKDReader {
       return false;
     }
 
-    private void pop(byte[] packedValue) {
+    private void pop() {
       nodeID /= 2;
       level--;
+     
+    }
+    
+    private void popBounds(byte[] packedValue) {
       // restore the split dimension
       System.arraycopy(
-          splitDimValueStack[level], 0, packedValue, splitDimsPos[level], config.bytesPerDim);
+              splitDimValueStack[level], 0, packedValue, splitDimsPos[level], config.bytesPerDim);
     }
 
     @Override
@@ -406,7 +420,9 @@ public class BKDDefaultReader implements BKDReader {
       if (nodeID == nodeRoot) {
         return false;
       }
-      pop((nodeID & 1) == 0 ? maxPackedValue : minPackedValue);
+      final byte[] packedValue = (nodeID & 1) == 0 ? maxPackedValue : minPackedValue;
+      pop();
+      popBounds(packedValue);
       return true;
     }
 
@@ -448,12 +464,21 @@ public class BKDDefaultReader implements BKDReader {
 
     @Override
     public void visitDocIDs(PointValues.IntersectVisitor visitor) throws IOException {
-      // Leaf node
-      leafNodes.seek(getLeafBlockFP());
-      // How many points are stored in this leaf cell:
-      int count = leafNodes.readVInt();
-      // No need to call grow(), it has been called up-front
-      DocIdsWriter.readInts(leafNodes, count, visitor);
+      if (isLeafNode()) {
+        // Leaf node
+        leafNodes.seek(getLeafBlockFP());
+        // How many points are stored in this leaf cell:
+        int count = leafNodes.readVInt();
+        // No need to call grow(), it has been called up-front
+        DocIdsWriter.readInts(leafNodes, count, visitor);
+      } else {
+        pushLeft();
+        visitDocIDs(visitor);
+        pop();
+        pushRight();
+        visitDocIDs(visitor);
+        pop();
+      }
     }
 
     @Override

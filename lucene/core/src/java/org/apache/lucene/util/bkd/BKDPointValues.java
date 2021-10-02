@@ -59,28 +59,17 @@ public final class BKDPointValues extends PointValues {
   }
 
   /** Fast path: this is called when the query box fully encompasses all cells under this node. */
-  private void addAll(IntersectVisitor visitor, BKDReader.IndexTree index, boolean grown)
+  private void addAll(IntersectVisitor visitor, BKDReader.IndexTree index)
       throws IOException {
     // System.out.println("R: addAll nodeID=" + nodeID);
-
-    if (grown == false) {
-      final long maxPointCount = index.size();
-      if (maxPointCount
-          <= Integer.MAX_VALUE) { // could be >MAX_VALUE if there are more than 2B points in total
-        visitor.grow((int) maxPointCount);
-        grown = true;
-      }
+    long maxPointCount = index.size();
+    while (maxPointCount > Integer.MAX_VALUE) {
+      // could be >MAX_VALUE if there are more than 2B points in total
+      visitor.grow(Integer.MAX_VALUE);
+      maxPointCount -= Integer.MAX_VALUE;
     }
-    if (index.moveToChild()) {
-      do {
-        addAll(visitor, index, grown);
-      } while (index.moveToSibling());
-      index.moveToParent();
-    } else {
-      assert grown;
-      // TODO: we can assert that the first value here in fact matches what the index claimed?
-      index.visitDocIDs(visitor);
-    }
+    visitor.grow((int) maxPointCount);
+    index.visitDocIDs(visitor);
   }
 
   private void intersect(IntersectVisitor visitor, BKDReader.IndexTree index) throws IOException {
@@ -90,7 +79,7 @@ public final class BKDPointValues extends PointValues {
     } else if (r == Relation.CELL_INSIDE_QUERY) {
       // This cell is fully inside of the query shape: recursively add all points in this cell
       // without filtering
-      addAll(visitor, index, false);
+      addAll(visitor, index);
       // The cell crosses the shape boundary, or the cell fully contains the query, so we fall
       // through and do full filtering:
     } else if (index.moveToChild()) {
