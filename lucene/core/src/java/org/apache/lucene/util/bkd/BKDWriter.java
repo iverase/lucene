@@ -1894,7 +1894,7 @@ public class BKDWriter implements Closeable {
       // sort the chosen dimension
       radixSelector.heapRadixSort(heapSource, from, to, sortedDim, commonPrefixLengths[sortedDim]);
       // compute cardinality
-      int leafCardinality = heapSource.computeCardinality(from, to, commonPrefixLengths);
+      int leafCardinality = heapSource.computeCardinality(from, to);
 
       // Save the block file pointer:
       leafBlockFPs[leavesOffset] = out.getFilePointer();

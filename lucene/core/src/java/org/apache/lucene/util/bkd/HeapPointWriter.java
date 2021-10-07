@@ -17,6 +17,8 @@
 package org.apache.lucene.util.bkd;
 
 import java.util.Arrays;
+
+import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.BitUtil;
 import org.apache.lucene.util.BytesRef;
 
@@ -105,20 +107,13 @@ public final class HeapPointWriter implements PointWriter {
     System.arraycopy(scratch, 0, block, indexJ, config.bytesPerDoc);
   }
 
-  public int computeCardinality(int from, int to, int[] commonPrefixLengths) {
+  public int computeCardinality(int from, int to) {
     int leafCardinality = 1;
+    ArrayUtil.ByteArrayComparator comparator = ArrayUtil.getUnsignedComparator(config.bytesPerDim);
     for (int i = from + 1; i < to; i++) {
       for (int dim = 0; dim < config.numDims; dim++) {
-        final int start = dim * config.bytesPerDim + commonPrefixLengths[dim];
-        final int end = dim * config.bytesPerDim + config.bytesPerDim;
-        if (Arrays.mismatch(
-                block,
-                i * config.bytesPerDoc + start,
-                i * config.bytesPerDoc + end,
-                block,
-                (i - 1) * config.bytesPerDoc + start,
-                (i - 1) * config.bytesPerDoc + end)
-            != -1) {
+        final int start = dim * config.bytesPerDim;
+        if (comparator.compare(block, i * config.bytesPerDoc + start, block, (i - 1) * config.bytesPerDoc + start) != -1) {
           leafCardinality++;
           break;
         }
