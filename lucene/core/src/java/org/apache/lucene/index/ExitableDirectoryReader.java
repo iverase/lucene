@@ -373,15 +373,9 @@ public class ExitableDirectoryReader extends FilterDirectoryReader {
     }
 
     @Override
-    public void intersect(IntersectVisitor visitor) throws IOException {
+    public IndexTree getIndexTree() throws IOException {
       checkAndThrow();
-      in.intersect(new ExitableIntersectVisitor(visitor, queryTimeout));
-    }
-
-    @Override
-    public long estimatePointCount(IntersectVisitor visitor) {
-      checkAndThrow();
-      return in.estimatePointCount(visitor);
+      return new ExitableIndexTree(in, in.getIndexTree(), queryTimeout);
     }
 
     @Override
@@ -427,17 +421,18 @@ public class ExitableDirectoryReader extends FilterDirectoryReader {
     }
   }
 
-  private static class ExitableIntersectVisitor implements PointValues.IntersectVisitor {
+  private static class ExitableIndexTree implements PointValues.IndexTree {
 
     private static final int MAX_CALLS_BEFORE_QUERY_TIMEOUT_CHECK = 10;
-
-    private final PointValues.IntersectVisitor in;
-    private final QueryTimeout queryTimeout;
     private int calls;
+    private final QueryTimeout queryTimeout;
+    private final PointValues.IndexTree indexTree;
+    private final PointValues in;
 
-    private ExitableIntersectVisitor(PointValues.IntersectVisitor in, QueryTimeout queryTimeout) {
-      this.in = in;
+    ExitableIndexTree(PointValues in, PointValues.IndexTree indexTree, QueryTimeout queryTimeout) {
+      this.indexTree = indexTree;
       this.queryTimeout = queryTimeout;
+      this.in = in;
     }
 
     /**
@@ -464,27 +459,63 @@ public class ExitableDirectoryReader extends FilterDirectoryReader {
     }
 
     @Override
-    public void visit(int docID) throws IOException {
+    public PointValues.IndexTree clone() {
       checkAndThrowWithSampling();
-      in.visit(docID);
+      return new ExitableIndexTree(in, indexTree.clone(), queryTimeout);
     }
 
     @Override
-    public void visit(int docID, byte[] packedValue) throws IOException {
+    public boolean moveToChild() throws IOException {
       checkAndThrowWithSampling();
-      in.visit(docID, packedValue);
+      return indexTree.moveToChild();
     }
 
     @Override
-    public PointValues.Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
-      checkAndThrow();
-      return in.compare(minPackedValue, maxPackedValue);
+    public boolean moveToSibling() throws IOException {
+      checkAndThrowWithSampling();
+      return indexTree.moveToSibling();
     }
 
     @Override
-    public void grow(int count) {
-      checkAndThrow();
-      in.grow(count);
+    public boolean moveToParent() throws IOException {
+      checkAndThrowWithSampling();
+      return indexTree.moveToParent();
+    }
+
+    @Override
+    public byte[] getMinPackedValue() {
+      checkAndThrowWithSampling();
+      return indexTree.getMinPackedValue();
+    }
+
+    @Override
+    public byte[] getMaxPackedValue() {
+      checkAndThrowWithSampling();
+      return indexTree.getMaxPackedValue();
+    }
+
+    @Override
+    public long size() {
+      checkAndThrowWithSampling();
+      return indexTree.size();
+    }
+
+    @Override
+    public void visitDocIDs(PointValues.IntersectVisitor visitor) throws IOException {
+      checkAndThrowWithSampling();
+      indexTree.visitDocIDs(visitor);
+    }
+
+    @Override
+    public void visitDocValues(PointValues.IntersectVisitor visitor) throws IOException {
+      checkAndThrowWithSampling();
+      indexTree.visitDocValues(visitor);
+    }
+
+    @Override
+    public int maxPointsPerLeafNode() {
+      checkAndThrowWithSampling();
+      return indexTree.maxPointsPerLeafNode();
     }
   }
 

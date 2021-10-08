@@ -361,24 +361,26 @@ final class SimpleTextBKDWriter implements Closeable {
 
     final OneDimensionBKDWriter oneDimWriter = new OneDimensionBKDWriter(out);
 
-    reader.intersect(
-        new IntersectVisitor() {
+    reader
+        .getIndexTree()
+        .visitDocValues(
+            new IntersectVisitor() {
 
-          @Override
-          public void visit(int docID, byte[] packedValue) throws IOException {
-            oneDimWriter.add(packedValue, docID);
-          }
+              @Override
+              public void visit(int docID, byte[] packedValue) throws IOException {
+                oneDimWriter.add(packedValue, docID);
+              }
 
-          @Override
-          public void visit(int docID) throws IOException {
-            throw new IllegalStateException();
-          }
+              @Override
+              public void visit(int docID) throws IOException {
+                throw new IllegalStateException();
+              }
 
-          @Override
-          public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
-            return Relation.CELL_CROSSES_QUERY;
-          }
-        });
+              @Override
+              public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
+                return Relation.CELL_CROSSES_QUERY;
+              }
+            });
 
     return oneDimWriter.finish();
   }

@@ -123,19 +123,8 @@ class CrankyPointsFormat extends PointsFormat {
       return new PointValues() {
 
         @Override
-        public void intersect(IntersectVisitor visitor) throws IOException {
-          if (random.nextInt(100) == 0) {
-            throw new IOException("Fake IOException");
-          }
-          delegate.intersect(visitor);
-          if (random.nextInt(100) == 0) {
-            throw new IOException("Fake IOException");
-          }
-        }
-
-        @Override
-        public long estimatePointCount(IntersectVisitor visitor) {
-          return delegate.estimatePointCount(visitor);
+        public IndexTree getIndexTree() throws IOException {
+          return new CrankyIndexTree(delegate.getIndexTree(), random);
         }
 
         @Override
@@ -188,6 +177,73 @@ class CrankyPointsFormat extends PointsFormat {
           return delegate.getDocCount();
         }
       };
+    }
+
+    private static class CrankyIndexTree implements PointValues.IndexTree {
+
+      private final PointValues.IndexTree indexTree;
+      final Random random;
+
+      CrankyIndexTree(PointValues.IndexTree indexTree, Random random) {
+        this.indexTree = indexTree;
+        this.random = random;
+      }
+
+      @Override
+      public PointValues.IndexTree clone() {
+        return new CrankyIndexTree(indexTree.clone(), random);
+      }
+
+      @Override
+      public boolean moveToChild() throws IOException {
+        return indexTree.moveToChild();
+      }
+
+      @Override
+      public boolean moveToSibling() throws IOException {
+        return indexTree.moveToSibling();
+      }
+
+      @Override
+      public boolean moveToParent() throws IOException {
+        return indexTree.moveToParent();
+      }
+
+      @Override
+      public byte[] getMinPackedValue() {
+        return indexTree.getMinPackedValue();
+      }
+
+      @Override
+      public byte[] getMaxPackedValue() {
+        return indexTree.getMaxPackedValue();
+      }
+
+      @Override
+      public long size() {
+        return indexTree.size();
+      }
+
+      @Override
+      public void visitDocIDs(PointValues.IntersectVisitor visitor) throws IOException {
+        if (random.nextInt(100) == 0) {
+          throw new IOException("Fake IOException");
+        }
+        indexTree.visitDocIDs(visitor);
+      }
+
+      @Override
+      public void visitDocValues(PointValues.IntersectVisitor visitor) throws IOException {
+        if (random.nextInt(100) == 0) {
+          throw new IOException("Fake IOException");
+        }
+        indexTree.visitDocValues(visitor);
+      }
+
+      @Override
+      public int maxPointsPerLeafNode() {
+        return indexTree.maxPointsPerLeafNode();
+      }
     }
 
     @Override

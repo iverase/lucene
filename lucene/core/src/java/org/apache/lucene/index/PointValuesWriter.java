@@ -104,20 +104,66 @@ class PointValuesWriter {
           }
 
           @Override
-          public void intersect(IntersectVisitor visitor) throws IOException {
-            final BytesRef scratch = new BytesRef();
-            final byte[] packedValue = new byte[packedBytesLength];
-            for (int i = 0; i < numPoints; i++) {
-              getValue(i, scratch);
-              assert scratch.length == packedValue.length;
-              System.arraycopy(scratch.bytes, scratch.offset, packedValue, 0, packedBytesLength);
-              visitor.visit(getDocID(i), packedValue);
-            }
-          }
+          public IndexTree getIndexTree() {
+            return new IndexTree() {
+              @Override
+              public IndexTree clone() {
+                throw new UnsupportedOperationException();
+              }
 
-          @Override
-          public long estimatePointCount(IntersectVisitor visitor) {
-            throw new UnsupportedOperationException();
+              @Override
+              public boolean moveToChild() throws IOException {
+                return false;
+              }
+
+              @Override
+              public boolean moveToSibling() throws IOException {
+                return false;
+              }
+
+              @Override
+              public boolean moveToParent() throws IOException {
+                return false;
+              }
+
+              @Override
+              public byte[] getMinPackedValue() {
+                throw new UnsupportedOperationException();
+              }
+
+              @Override
+              public byte[] getMaxPackedValue() {
+                throw new UnsupportedOperationException();
+              }
+
+              @Override
+              public long size() {
+                return numPoints;
+              }
+
+              @Override
+              public void visitDocIDs(IntersectVisitor visitor) throws IOException {
+                throw new UnsupportedOperationException();
+              }
+
+              @Override
+              public void visitDocValues(IntersectVisitor visitor) throws IOException {
+                final BytesRef scratch = new BytesRef();
+                final byte[] packedValue = new byte[packedBytesLength];
+                for (int i = 0; i < numPoints; i++) {
+                  getValue(i, scratch);
+                  assert scratch.length == packedValue.length;
+                  System.arraycopy(
+                      scratch.bytes, scratch.offset, packedValue, 0, packedBytesLength);
+                  visitor.visit(getDocID(i), packedValue);
+                }
+              }
+
+              @Override
+              public int maxPointsPerLeafNode() {
+                throw new UnsupportedOperationException();
+              }
+            };
           }
 
           @Override
@@ -233,29 +279,91 @@ class PointValuesWriter {
     }
 
     @Override
-    public void intersect(IntersectVisitor visitor) throws IOException {
-      in.intersect(
-          new IntersectVisitor() {
-            @Override
-            public void visit(int docID) throws IOException {
-              visitor.visit(docMap.oldToNew(docID));
-            }
+    public IndexTree getIndexTree() throws IOException {
+      IndexTree indexTree = in.getIndexTree();
+      return new IndexTree() {
+        @Override
+        public IndexTree clone() {
+          return indexTree.clone();
+        }
 
-            @Override
-            public void visit(int docID, byte[] packedValue) throws IOException {
-              visitor.visit(docMap.oldToNew(docID), packedValue);
-            }
+        @Override
+        public boolean moveToChild() throws IOException {
+          return indexTree.moveToChild();
+        }
 
-            @Override
-            public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
-              return visitor.compare(minPackedValue, maxPackedValue);
-            }
-          });
-    }
+        @Override
+        public boolean moveToSibling() throws IOException {
+          return indexTree.moveToSibling();
+        }
 
-    @Override
-    public long estimatePointCount(IntersectVisitor visitor) {
-      return in.estimatePointCount(visitor);
+        @Override
+        public boolean moveToParent() throws IOException {
+          return indexTree.moveToParent();
+        }
+
+        @Override
+        public byte[] getMinPackedValue() {
+          return indexTree.getMinPackedValue();
+        }
+
+        @Override
+        public byte[] getMaxPackedValue() {
+          return indexTree.getMaxPackedValue();
+        }
+
+        @Override
+        public long size() {
+          return indexTree.size();
+        }
+
+        @Override
+        public void visitDocIDs(IntersectVisitor visitor) throws IOException {
+          indexTree.visitDocIDs(
+              new IntersectVisitor() {
+                @Override
+                public void visit(int docID) throws IOException {
+                  visitor.visit(docMap.oldToNew(docID));
+                }
+
+                @Override
+                public void visit(int docID, byte[] packedValue) throws IOException {
+                  visitor.visit(docMap.oldToNew(docID), packedValue);
+                }
+
+                @Override
+                public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
+                  return visitor.compare(minPackedValue, maxPackedValue);
+                }
+              });
+        }
+
+        @Override
+        public void visitDocValues(IntersectVisitor visitor) throws IOException {
+          indexTree.visitDocValues(
+              new IntersectVisitor() {
+                @Override
+                public void visit(int docID) throws IOException {
+                  visitor.visit(docMap.oldToNew(docID));
+                }
+
+                @Override
+                public void visit(int docID, byte[] packedValue) throws IOException {
+                  visitor.visit(docMap.oldToNew(docID), packedValue);
+                }
+
+                @Override
+                public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
+                  return visitor.compare(minPackedValue, maxPackedValue);
+                }
+              });
+        }
+
+        @Override
+        public int maxPointsPerLeafNode() {
+          throw new UnsupportedOperationException();
+        }
+      };
     }
 
     @Override

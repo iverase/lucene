@@ -124,24 +124,26 @@ public class RandomCodec extends AssertingCodec {
                         maxMBSortInHeap,
                         values.size(),
                         bkdSplitRandomSeed ^ fieldInfo.name.hashCode())) {
-                  values.intersect(
-                      new IntersectVisitor() {
-                        @Override
-                        public void visit(int docID) {
-                          throw new IllegalStateException();
-                        }
+                  values
+                      .getIndexTree()
+                      .visitDocValues(
+                          new IntersectVisitor() {
+                            @Override
+                            public void visit(int docID) {
+                              throw new IllegalStateException();
+                            }
 
-                        @Override
-                        public void visit(int docID, byte[] packedValue) throws IOException {
-                          writer.add(packedValue, docID);
-                        }
+                            @Override
+                            public void visit(int docID, byte[] packedValue) throws IOException {
+                              writer.add(packedValue, docID);
+                            }
 
-                        @Override
-                        public PointValues.Relation compare(
-                            byte[] minPackedValue, byte[] maxPackedValue) {
-                          return PointValues.Relation.CELL_CROSSES_QUERY;
-                        }
-                      });
+                            @Override
+                            public PointValues.Relation compare(
+                                byte[] minPackedValue, byte[] maxPackedValue) {
+                              return PointValues.Relation.CELL_CROSSES_QUERY;
+                            }
+                          });
 
                   // We could have 0 points on merge since all docs with dimensional fields may be
                   // deleted:

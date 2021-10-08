@@ -37,7 +37,6 @@ import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.bkd.BKDConfig;
-import org.apache.lucene.util.bkd.BKDReader;
 import org.apache.lucene.util.bkd.BKDWriter;
 
 /** Writes dimensional values */
@@ -128,23 +127,25 @@ public class Lucene60PointsWriter extends PointsWriter {
         return;
       }
 
-      values.intersect(
-          new IntersectVisitor() {
-            @Override
-            public void visit(int docID) {
-              throw new IllegalStateException();
-            }
+      values
+          .getIndexTree()
+          .visitDocValues(
+              new IntersectVisitor() {
+                @Override
+                public void visit(int docID) {
+                  throw new IllegalStateException();
+                }
 
-            @Override
-            public void visit(int docID, byte[] packedValue) throws IOException {
-              writer.add(packedValue, docID);
-            }
+                @Override
+                public void visit(int docID, byte[] packedValue) throws IOException {
+                  writer.add(packedValue, docID);
+                }
 
-            @Override
-            public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
-              return Relation.CELL_CROSSES_QUERY;
-            }
-          });
+                @Override
+                public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
+                  return Relation.CELL_CROSSES_QUERY;
+                }
+              });
 
       // We could have 0 points on merge since all docs with dimensional fields may be deleted:
       Runnable finalizer = writer.finish(dataOut, dataOut, dataOut);
@@ -214,7 +215,7 @@ public class Lucene60PointsWriter extends PointsWriter {
                   config,
                   maxMBSortInHeap,
                   totMaxSize)) {
-            List<BKDReader> bkdReaders = new ArrayList<>();
+            List<PointValues> pointValues = new ArrayList<>();
             List<MergeState.DocMap> docMaps = new ArrayList<>();
             for (int i = 0; i < mergeState.pointsReaders.length; i++) {
               PointsReader reader = mergeState.pointsReaders[i];
@@ -233,16 +234,16 @@ public class Lucene60PointsWriter extends PointsWriter {
                 FieldInfos readerFieldInfos = mergeState.fieldInfos[i];
                 FieldInfo readerFieldInfo = readerFieldInfos.fieldInfo(fieldInfo.name);
                 if (readerFieldInfo != null && readerFieldInfo.getPointDimensionCount() > 0) {
-                  BKDReader bkdReader = reader60.readers.get(readerFieldInfo.number);
-                  if (bkdReader != null) {
-                    bkdReaders.add(bkdReader);
+                  PointValues aPointValues = reader60.readers.get(readerFieldInfo.number);
+                  if (aPointValues != null) {
+                    pointValues.add(aPointValues);
                     docMaps.add(mergeState.docMaps[i]);
                   }
                 }
               }
             }
 
-            Runnable finalizer = writer.merge(dataOut, dataOut, dataOut, docMaps, bkdReaders);
+            Runnable finalizer = writer.merge(dataOut, dataOut, dataOut, docMaps, pointValues);
             if (finalizer != null) {
               indexFPs.put(fieldInfo.name, dataOut.getFilePointer());
               finalizer.run();

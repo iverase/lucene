@@ -92,23 +92,25 @@ class SimpleTextPointsWriter extends PointsWriter {
             SimpleTextBKDWriter.DEFAULT_MAX_MB_SORT_IN_HEAP,
             values.size())) {
 
-      values.intersect(
-          new IntersectVisitor() {
-            @Override
-            public void visit(int docID) {
-              throw new IllegalStateException();
-            }
+      values
+          .getIndexTree()
+          .visitDocValues(
+              new IntersectVisitor() {
+                @Override
+                public void visit(int docID) {
+                  throw new IllegalStateException();
+                }
 
-            @Override
-            public void visit(int docID, byte[] packedValue) throws IOException {
-              writer.add(packedValue, docID);
-            }
+                @Override
+                public void visit(int docID, byte[] packedValue) throws IOException {
+                  writer.add(packedValue, docID);
+                }
 
-            @Override
-            public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
-              return Relation.CELL_CROSSES_QUERY;
-            }
-          });
+                @Override
+                public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
+                  return Relation.CELL_CROSSES_QUERY;
+                }
+              });
 
       // We could have 0 points on merge since all docs with points may be deleted:
       if (writer.getPointCount() > 0) {
