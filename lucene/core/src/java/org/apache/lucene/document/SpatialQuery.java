@@ -313,6 +313,9 @@ abstract class SpatialQuery extends Query {
     private Scorer getDenseScorer(
         LeafReader reader, Weight weight, final float boost, ScoreMode scoreMode)
         throws IOException {
+      if (hasHits(new HasHitsVisitor(spatialVisitor, queryRelation), values.getPointTree()) == false) {
+        return new ConstantScoreScorer(weight, boost, scoreMode, DocIdSetIterator.empty());
+      }
       final FixedBitSet result = new FixedBitSet(reader.maxDoc());
       final long[] cost;
       if (values.getDocCount() == reader.maxDoc()) {
@@ -326,15 +329,14 @@ abstract class SpatialQuery extends Query {
         final BiFunction<byte[], byte[], Relation> compare =
                 spatialVisitor.getInnerFunction(queryRelation);
         final Predicate<byte[]> leafPredicate = spatialVisitor.getLeafPredicate(queryRelation);
-        cost = new long[] {0};
-        if (hasHits(new HasHitsVisitor(compare, leafPredicate), values.getPointTree()) ) {
-          // Get potential  documents.
-          final FixedBitSet excluded = new FixedBitSet(reader.maxDoc());
-          final IntersectVisitor visitor = getDenseVisitor(leafPredicate, result, excluded, cost);
-          final IntersectVisitor excludedVisitor = getShallowInverseDenseVisitor(excluded);
-          denseIntersects(compare, visitor, excludedVisitor, values.getPointTree());
-          result.andNot(excluded);
-        }
+        cost = new long[]{0};
+        // Get potential  documents.
+        final FixedBitSet excluded = new FixedBitSet(reader.maxDoc());
+        final IntersectVisitor visitor = getDenseVisitor(leafPredicate, result, excluded, cost);
+        final IntersectVisitor excludedVisitor = getShallowInverseDenseVisitor(excluded);
+        denseIntersects(compare, visitor, excludedVisitor, values.getPointTree());
+        result.andNot(excluded);
+
       }
       assert cost[0] > 0 || result.cardinality() == 0;
       final DocIdSetIterator iterator =
@@ -715,9 +717,9 @@ abstract class SpatialQuery extends Query {
     private final Predicate<byte[]> leafPredicate;
     private boolean hasMatches;
     
-    HasHitsVisitor(BiFunction<byte[], byte[], Relation> compare, Predicate<byte[]> leafPredicate) {
-      this.compare = compare;
-      this.leafPredicate = leafPredicate;
+    HasHitsVisitor(SpatialVisitor visitor, QueryRelation queryRelation) {
+      this.compare = visitor.getInnerFunction(queryRelation);
+      this.leafPredicate = visitor.getLeafPredicate(queryRelation);
     }
     
     boolean hasMatches() {
