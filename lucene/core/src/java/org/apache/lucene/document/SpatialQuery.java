@@ -17,6 +17,7 @@
 package org.apache.lucene.document;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -29,6 +30,7 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.PointValues;
 import org.apache.lucene.index.PointValues.IntersectVisitor;
 import org.apache.lucene.index.PointValues.Relation;
+import org.apache.lucene.search.CollectionTerminatedException;
 import org.apache.lucene.search.ConstantScoreScorer;
 import org.apache.lucene.search.ConstantScoreWeight;
 import org.apache.lucene.search.DocIdSetIterator;
@@ -177,6 +179,14 @@ abstract class SpatialQuery extends Query {
             }
           };
         } else {
+          if (queryRelation != QueryRelation.INTERSECTS
+              && queryRelation != QueryRelation.CONTAINS
+              && values.getDocCount() != values.size()
+              && hasAnyHits(spatialVisitor, queryRelation, values) == false) {
+            // First we check if we have any hits so we are fast in the adversarial case where
+            // the shape does not match any documents and we are in the dense case
+            return null;
+          }
           // walk the tree to get matching documents
           return new RelationScorerSupplier(values, spatialVisitor, queryRelation, field) {
             @Override
@@ -313,9 +323,6 @@ abstract class SpatialQuery extends Query {
     private Scorer getDenseScorer(
         LeafReader reader, Weight weight, final float boost, ScoreMode scoreMode)
         throws IOException {
-      if (hasHits(new HasHitsVisitor(spatialVisitor, queryRelation), values.getPointTree()) == false) {
-        return new ConstantScoreScorer(weight, boost, scoreMode, DocIdSetIterator.empty());
-      }
       final FixedBitSet result = new FixedBitSet(reader.maxDoc());
       final long[] cost;
       if (values.getDocCount() == reader.maxDoc()) {
@@ -326,73 +333,46 @@ abstract class SpatialQuery extends Query {
         // Remove false positives
         values.intersect(getInverseDenseVisitor(spatialVisitor, queryRelation, result, cost));
       } else {
-        final BiFunction<byte[], byte[], Relation> compare =
-                spatialVisitor.getInnerFunction(queryRelation);
-        final Predicate<byte[]> leafPredicate = spatialVisitor.getLeafPredicate(queryRelation);
-        cost = new long[]{0};
+        cost = new long[] {0};
         // Get potential  documents.
         final FixedBitSet excluded = new FixedBitSet(reader.maxDoc());
-        final IntersectVisitor visitor = getDenseVisitor(leafPredicate, result, excluded, cost);
-        final IntersectVisitor excludedVisitor = getShallowInverseDenseVisitor(excluded);
-        denseIntersects(compare, visitor, excludedVisitor, values.getPointTree());
+        IntersectVisitor visitor = getDenseVisitor(spatialVisitor, queryRelation, result, excluded, cost);
+        IntersectVisitor exclude = getShallowInverseDenseVisitor(excluded);
+        intersects(visitor, exclude, values.getPointTree());
         result.andNot(excluded);
-
       }
       assert cost[0] > 0 || result.cardinality() == 0;
       final DocIdSetIterator iterator =
           cost[0] == 0 ? DocIdSetIterator.empty() : new BitSetIterator(result, cost[0]);
       return new ConstantScoreScorer(weight, boost, scoreMode, iterator);
     }
-
-    private boolean hasHits(HasHitsVisitor visitor, PointValues.PointTree pointTree) throws IOException {
+    
+    private void intersects(IntersectVisitor visitor,
+                            IntersectVisitor exclude,
+                            PointValues.PointTree pointTree) throws IOException {
       Relation r = visitor.compare(pointTree.getMinPackedValue(), pointTree.getMaxPackedValue());
       switch (r) {
         case CELL_OUTSIDE_QUERY:
-          return false;
+          pointTree.visitDocIDs(exclude);
+          break;
         case CELL_INSIDE_QUERY:
-          return true;
+          // This cell is fully inside the query shape: recursively add all points in this cell
+          // without filtering
+          pointTree.visitDocIDs(visitor);
+          break;
         case CELL_CROSSES_QUERY:
           // The cell crosses the shape boundary, or the cell fully contains the query, so we fall
           // through and do full filtering:
           if (pointTree.moveToChild()) {
             do {
-              if (hasHits(visitor, pointTree)) {
-                return true;
-              }
+              intersects(visitor, exclude, pointTree);
             } while (pointTree.moveToSibling());
             pointTree.moveToParent();
           } else {
+            // TODO: we can assert that the first value here in fact matches what the pointTree
+            // claimed?
+            // Leaf node; scan and filter all points in this block:
             pointTree.visitDocValues(visitor);
-            return visitor.hasMatches();
-          }
-          return false;
-        default:
-          throw new IllegalArgumentException("Unreachable code");
-      }
-    }
-    
-    private void denseIntersects(BiFunction<byte[], byte[], Relation> compare, 
-                                 IntersectVisitor result, IntersectVisitor excluded, PointValues.PointTree pointTree)
-    throws IOException {
-      Relation r = compare.apply(pointTree.getMinPackedValue(), pointTree.getMaxPackedValue());
-      switch (r) {
-        case CELL_OUTSIDE_QUERY:
-          // This cell is fully outside the query shape: stop recursing
-          pointTree.visitDocIDs(excluded);
-          break;
-        case CELL_INSIDE_QUERY:
-          pointTree.visitDocIDs(result);
-          break;
-        case CELL_CROSSES_QUERY:
-          // The cell crosses the shape boundary, or the cell fully contains the query, so we fall
-          // through and do full filtering:
-          if (pointTree.moveToChild()) {
-            do {
-              denseIntersects(compare, result, excluded, pointTree);
-            } while (pointTree.moveToSibling());
-            pointTree.moveToParent();
-          } else {
-            pointTree.visitDocValues(result);
           }
           break;
         default:
@@ -546,10 +526,14 @@ abstract class SpatialQuery extends Query {
    * WITHIN & DISJOINT
    */
   private static IntersectVisitor getDenseVisitor(
-          final Predicate<byte[]> leafPredicate,
+      final SpatialVisitor spatialVisitor,
+      final QueryRelation queryRelation,
       final FixedBitSet result,
       final FixedBitSet excluded,
       final long[] cost) {
+    final BiFunction<byte[], byte[], Relation> innerFunction =
+        spatialVisitor.getInnerFunction(queryRelation);
+    final Predicate<byte[]> leafPredicate = spatialVisitor.getLeafPredicate(queryRelation);
     return new IntersectVisitor() {
       @Override
       public void visit(int docID) {
@@ -583,7 +567,7 @@ abstract class SpatialQuery extends Query {
 
       @Override
       public Relation compare(byte[] minTriangle, byte[] maxTriangle) {
-        return Relation.CELL_CROSSES_QUERY;
+        return innerFunction.apply(minTriangle, maxTriangle);
       }
     };
   }
@@ -706,48 +690,58 @@ abstract class SpatialQuery extends Query {
 
       @Override
       public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
-       throw new UnsupportedOperationException();
+        throw new UnsupportedOperationException();
       }
     };
   }
-  
-  private static class HasHitsVisitor implements IntersectVisitor {
 
-    private final BiFunction<byte[], byte[], Relation> compare;
-    private final Predicate<byte[]> leafPredicate;
-    private boolean hasMatches;
-    
-    HasHitsVisitor(SpatialVisitor visitor, QueryRelation queryRelation) {
-      this.compare = visitor.getInnerFunction(queryRelation);
-      this.leafPredicate = visitor.getLeafPredicate(queryRelation);
-    }
-    
-    boolean hasMatches() {
-      return hasMatches;
-    }
+  /**
+   * Return true if the query matches at least one document. It creates a visitor that terminates as
+   * soon as one or more docs are matched.
+   */
+  private static boolean hasAnyHits(
+      final SpatialVisitor spatialVisitor, QueryRelation queryRelation, final PointValues values)
+      throws IOException {
+    try {
+      final BiFunction<byte[], byte[], Relation> innerFunction =
+          spatialVisitor.getInnerFunction(queryRelation);
+      final Predicate<byte[]> leafPredicate = spatialVisitor.getLeafPredicate(queryRelation);
+      values.intersect(
+          new IntersectVisitor() {
 
-    @Override
-    public void visit(int docID) throws IOException {
-      hasMatches = true;
-    }
+            @Override
+            public void visit(int docID) {
+              throw new CollectionTerminatedException();
+            }
 
-    @Override
-    public void visit(int docID, byte[] packedValue) throws IOException {
-      if (hasMatches == false && leafPredicate.test(packedValue)) {
-        hasMatches = true;
-      }
-    }
+            @Override
+            public void visit(int docID, byte[] t) {
+              if (leafPredicate.test(t)) {
+                throw new CollectionTerminatedException();
+              }
+            }
 
-    @Override
-    public void visit(DocIdSetIterator iterator, byte[] packedValue) throws IOException {
-       if (hasMatches == false && leafPredicate.test(packedValue)) {
-         hasMatches = true;
-       }
-    }
+            @Override
+            public void visit(DocIdSetIterator iterator, byte[] t) {
+              if (leafPredicate.test(t)) {
+                throw new CollectionTerminatedException();
+              }
+            }
 
-    @Override
-    public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
-      return compare.apply(minPackedValue, maxPackedValue);
+            @Override
+            public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
+              Relation rel = innerFunction.apply(minPackedValue, maxPackedValue);
+              if (rel == Relation.CELL_INSIDE_QUERY) {
+                throw new CollectionTerminatedException();
+              }
+              return rel;
+            }
+          });
+    } catch (
+        @SuppressWarnings("unused")
+        CollectionTerminatedException e) {
+      return true;
     }
+    return false;
   }
 }
