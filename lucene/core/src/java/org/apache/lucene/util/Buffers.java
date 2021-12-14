@@ -65,7 +65,7 @@ class Buffers {
         return true;
     }
 
-    public long toBitSet(BitSet bitSet) {
+    public int toBitSet(BitSet bitSet) {
         long counter = 0;
         for (Buffer buffer : buffers) {
             int[] array = buffer.array;
@@ -75,7 +75,7 @@ class Buffers {
                 bitSet.set(array[i]);
             }
         }
-        return counter;
+        return Math.toIntExact(counter);
     }
 
     public DocIdSet toDocIdSet(int maxDoc, boolean multivalued) {

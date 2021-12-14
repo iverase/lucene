@@ -47,13 +47,22 @@ public final class DocIdSetBuilder {
         add(docID);
       }
     }
+
+    protected abstract boolean ensureCapacity(int numDocs);
+
+    protected abstract DocIdSet toDocIdSet();
+
+    protected abstract int toBitSet(BitSet bitSet);
   }
 
   private static class FixedBitSetAdder extends BulkAdder {
     final FixedBitSet bitSet;
+    final double numValuesPerDoc;
+    long counter;
 
-    FixedBitSetAdder(FixedBitSet bitSet) {
+    FixedBitSetAdder(FixedBitSet bitSet, double numValuesPerDoc) {
       this.bitSet = bitSet;
+      this.numValuesPerDoc = numValuesPerDoc;
     }
 
     @Override
@@ -65,18 +74,54 @@ public final class DocIdSetBuilder {
     public void add(DocIdSetIterator iterator) throws IOException {
       bitSet.or(iterator);
     }
+    
+    protected boolean ensureCapacity(int numDocs) {
+      counter += numDocs;
+      return true;
+    }
+
+    @Override
+    protected DocIdSet toDocIdSet() {
+      assert counter >= 0;
+      final long cost = Math.round(counter / numValuesPerDoc);
+      return new BitDocIdSet(bitSet, cost);
+    }
+
+    @Override
+    protected int toBitSet(BitSet bitSet) {
+      throw new UnsupportedOperationException();
+    }
   }
 
   private static class BufferAdder extends BulkAdder {
-    final Buffers buffer;
+    final Buffers buffers;
+    final int maxDoc;
+    final boolean multivalued;
+   
 
-    BufferAdder(Buffers buffer) {
-      this.buffer = buffer;
+    BufferAdder(Buffers buffers, int maxDoc, boolean multivalued) {
+      this.buffers = buffers;
+      this.maxDoc = maxDoc;
+      this.multivalued = multivalued;
     }
 
     @Override
     public void add(int doc) {
-      buffer.addDoc(doc);
+      buffers.addDoc(doc);
+    }
+
+    protected boolean ensureCapacity(int numDocs) {
+      return buffers.ensureBufferCapacity(numDocs);
+    }
+
+    @Override
+    protected DocIdSet toDocIdSet() {
+      return buffers.toDocIdSet(maxDoc, multivalued);
+    }
+
+    @Override
+    protected int toBitSet(BitSet bitSet) {
+      return buffers.toBitSet(bitSet);
     }
   }
 
@@ -84,11 +129,7 @@ public final class DocIdSetBuilder {
   // pkg-private for testing
   final boolean multivalued;
   final double numValuesPerDoc;
-
-  private Buffers buffers;
-  private FixedBitSet bitSet;
-
-  private long counter = -1;
+  
   private BulkAdder adder;
 
   /** Create a builder that can contain doc IDs between {@code 0} and {@code maxDoc}. */
@@ -130,9 +171,8 @@ public final class DocIdSetBuilder {
     // maxDoc >>> 7 is a good value if you want to save memory, lower values
     // such as maxDoc >>> 11 should provide faster building but at the expense
     // of using a full bitset even for quite sparse data
-    this.buffers = new Buffers(maxDoc >>> 7);
-    this.adder = new BufferAdder(buffers);
-    this.bitSet = null;
+    Buffers buffers = new Buffers(maxDoc >>> 7);
+    this.adder = new BufferAdder(buffers, maxDoc, multivalued);
   }
 
   /**
@@ -141,22 +181,9 @@ public final class DocIdSetBuilder {
    * RoaringDocIdSet.Builder}.
    */
   public void add(DocIdSetIterator iter) throws IOException {
-    if (bitSet != null) {
-      bitSet.or(iter);
-      return;
-    }
     int cost = (int) Math.min(Integer.MAX_VALUE, iter.cost());
-    BulkAdder adder = grow(cost);
-    for (int i = 0; i < cost; ++i) {
-      int doc = iter.nextDoc();
-      if (doc == DocIdSetIterator.NO_MORE_DOCS) {
-        return;
-      }
-      adder.add(doc);
-    }
-    for (int doc = iter.nextDoc(); doc != DocIdSetIterator.NO_MORE_DOCS; doc = iter.nextDoc()) {
-      grow(1).add(doc);
-    }
+    grow(cost);
+    adder.add(iter);
   }
 
   /**
@@ -164,39 +191,21 @@ public final class DocIdSetBuilder {
    * numDocs} documents.
    */
   public BulkAdder grow(int numDocs) {
-    if (bitSet == null) {
-      if (buffers.ensureBufferCapacity(numDocs) == false) {
-        upgradeToBitSet();
-        counter += numDocs;
-      }
-    } else {
-      counter += numDocs;
+    if (adder.ensureCapacity(numDocs) == false) {
+      FixedBitSet bitSet = new FixedBitSet(maxDoc);
+      int counter = adder.toBitSet(bitSet);
+      this.adder = new FixedBitSetAdder(bitSet, numValuesPerDoc);
+      adder.ensureCapacity(counter + numDocs);
     }
     return adder;
   }
-
-  private void upgradeToBitSet() {
-    assert bitSet == null;
-    FixedBitSet bitSet = new FixedBitSet(maxDoc);
-    this.counter = buffers.toBitSet(bitSet);
-    this.bitSet = bitSet;
-    this.buffers = null;
-    this.adder = new FixedBitSetAdder(bitSet);
-  }
-
+  
   /** Build a {@link DocIdSet} from the accumulated doc IDs. */
   public DocIdSet build() {
     try {
-      if (bitSet != null) {
-        assert counter >= 0;
-        final long cost = Math.round(counter / numValuesPerDoc);
-        return new BitDocIdSet(bitSet, cost);
-      } else {
-        return buffers.toDocIdSet(maxDoc, multivalued);
-      }
+      return adder.toDocIdSet();
     } finally {
-      this.buffers = null;
-      this.bitSet = null;
+      this.adder = null;
     }
   }
 }
