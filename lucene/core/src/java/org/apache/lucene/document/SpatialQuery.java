@@ -17,6 +17,7 @@
 package org.apache.lucene.document;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -40,9 +41,7 @@ import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.ScorerSupplier;
 import org.apache.lucene.search.Weight;
-import org.apache.lucene.util.BitSetIterator;
 import org.apache.lucene.util.DocIdSetBuilder;
-import org.apache.lucene.util.FixedBitSet;
 
 /**
  * Base query class for all spatial geometries: {@link LatLonShape}, {@link LatLonPoint} and {@link
@@ -295,20 +294,19 @@ abstract class SpatialQuery extends Query {
         // If all docs have exactly one value and the cost is greater
         // than half the leaf size then maybe we can make things faster
         // by computing the set of documents that do NOT match the query
-        final FixedBitSet result = new FixedBitSet(reader.maxDoc());
-        result.set(0, reader.maxDoc());
+        final FastSparseBitSet result = new FastSparseBitSet(reader.maxDoc());
+        result.setAll();
         final long[] cost = new long[] {reader.maxDoc()};
         values.intersect(getInverseDenseVisitor(spatialVisitor, queryRelation, result, cost));
-        final DocIdSetIterator iterator = new BitSetIterator(result, cost[0]);
-        return new ConstantScoreScorer(weight, boost, scoreMode, iterator);
+        return new ConstantScoreScorer(weight, boost, scoreMode, result.iterator(cost[0]));
       } else if (values.getDocCount() < (values.size() >>> 2)) {
         // we use a dense structure so we can skip already visited documents
-        final FixedBitSet result = new FixedBitSet(reader.maxDoc());
+        final FastSparseBitSet result = new FastSparseBitSet(reader.maxDoc());
         final long[] cost = new long[] {0};
         values.intersect(getIntersectsDenseVisitor(spatialVisitor, queryRelation, result, cost));
         assert cost[0] > 0 || result.cardinality() == 0;
         final DocIdSetIterator iterator =
-            cost[0] == 0 ? DocIdSetIterator.empty() : new BitSetIterator(result, cost[0]);
+            cost[0] == 0 ? DocIdSetIterator.empty() : result.iterator(cost[0]);//new BitSetIterator(result, cost[0]);
         return new ConstantScoreScorer(weight, boost, scoreMode, iterator);
       } else {
         final DocIdSetBuilder docIdSetBuilder = new DocIdSetBuilder(reader.maxDoc(), values, field);
@@ -322,19 +320,19 @@ abstract class SpatialQuery extends Query {
     private Scorer getDenseScorer(
         LeafReader reader, Weight weight, final float boost, ScoreMode scoreMode)
         throws IOException {
-      final FixedBitSet result = new FixedBitSet(reader.maxDoc());
+      final FastSparseBitSet result = new FastSparseBitSet(reader.maxDoc());
       final long[] cost;
       if (values.getDocCount() == reader.maxDoc()) {
         cost = new long[] {values.size()};
         // In this case we can spare one visit to the tree, all documents
         // are potential matches
-        result.set(0, reader.maxDoc());
+        result.setAll();
         // Remove false positives
         values.intersect(getInverseDenseVisitor(spatialVisitor, queryRelation, result, cost));
       } else {
         cost = new long[] {0};
         // Get potential  documents.
-        final FixedBitSet excluded = new FixedBitSet(reader.maxDoc());
+        final FastSparseBitSet excluded = new FastSparseBitSet(reader.maxDoc());
         values.intersect(getDenseVisitor(spatialVisitor, queryRelation, result, excluded, cost));
         result.andNot(excluded);
         // Remove false positives, we only care about the inner nodes as intersecting
@@ -344,23 +342,23 @@ abstract class SpatialQuery extends Query {
       }
       assert cost[0] > 0 || result.cardinality() == 0;
       final DocIdSetIterator iterator =
-          cost[0] == 0 ? DocIdSetIterator.empty() : new BitSetIterator(result, cost[0]);
+          cost[0] == 0 ? DocIdSetIterator.empty() : result.iterator(cost[0]);
       return new ConstantScoreScorer(weight, boost, scoreMode, iterator);
     }
 
     private Scorer getContainsDenseScorer(
         LeafReader reader, Weight weight, final float boost, ScoreMode scoreMode)
         throws IOException {
-      final FixedBitSet result = new FixedBitSet(reader.maxDoc());
+      final FastSparseBitSet result = new FastSparseBitSet(reader.maxDoc());
       final long[] cost = new long[] {0};
       // Get potential  documents.
-      final FixedBitSet excluded = new FixedBitSet(reader.maxDoc());
+      final FastSparseBitSet excluded = new FastSparseBitSet(reader.maxDoc());
       values.intersect(
           getContainsDenseVisitor(spatialVisitor, queryRelation, result, excluded, cost));
       result.andNot(excluded);
       assert cost[0] > 0 || result.cardinality() == 0;
       final DocIdSetIterator iterator =
-          cost[0] == 0 ? DocIdSetIterator.empty() : new BitSetIterator(result, cost[0]);
+          cost[0] == 0 ? DocIdSetIterator.empty() : result.iterator(cost[0]);
       return new ConstantScoreScorer(weight, boost, scoreMode, iterator);
     }
 
@@ -455,7 +453,7 @@ abstract class SpatialQuery extends Query {
   private static IntersectVisitor getIntersectsDenseVisitor(
       final SpatialVisitor spatialVisitor,
       QueryRelation queryRelation,
-      final FixedBitSet result,
+      final FastSparseBitSet result,
       final long[] cost) {
     final BiFunction<byte[], byte[], Relation> innerFunction =
         spatialVisitor.getInnerFunction(queryRelation);
@@ -468,11 +466,11 @@ abstract class SpatialQuery extends Query {
         cost[0]++;
       }
 
-      @Override
-      public void visit(DocIdSetIterator iterator) throws IOException {
-        result.or(iterator);
-        cost[0] += iterator.cost();
-      }
+//      @Override
+//      public void visit(DocIdSetIterator iterator) throws IOException {
+//        result.or(iterator);
+//        cost[0] += iterator.cost();
+//      }
 
       @Override
       public void visit(int docID, byte[] t) {
@@ -507,8 +505,8 @@ abstract class SpatialQuery extends Query {
   private static IntersectVisitor getDenseVisitor(
       final SpatialVisitor spatialVisitor,
       final QueryRelation queryRelation,
-      final FixedBitSet result,
-      final FixedBitSet excluded,
+      final FastSparseBitSet result,
+      final FastSparseBitSet excluded,
       final long[] cost) {
     final BiFunction<byte[], byte[], Relation> innerFunction =
         spatialVisitor.getInnerFunction(queryRelation);
@@ -520,11 +518,11 @@ abstract class SpatialQuery extends Query {
         cost[0]++;
       }
 
-      @Override
-      public void visit(DocIdSetIterator iterator) throws IOException {
-        result.or(iterator);
-        cost[0] += iterator.cost();
-      }
+//      @Override
+//      public void visit(DocIdSetIterator iterator) throws IOException {
+//        result.or(iterator);
+//        cost[0] += iterator.cost();
+//      }
 
       @Override
       public void visit(int docID, byte[] t) {
@@ -564,8 +562,8 @@ abstract class SpatialQuery extends Query {
   private static IntersectVisitor getContainsDenseVisitor(
       final SpatialVisitor spatialVisitor,
       final QueryRelation queryRelation,
-      final FixedBitSet result,
-      final FixedBitSet excluded,
+      final FastSparseBitSet result,
+      final FastSparseBitSet excluded,
       final long[] cost) {
     final BiFunction<byte[], byte[], Relation> innerFunction =
         spatialVisitor.getInnerFunction(queryRelation);
@@ -576,10 +574,10 @@ abstract class SpatialQuery extends Query {
         excluded.set(docID);
       }
 
-      @Override
-      public void visit(DocIdSetIterator iterator) throws IOException {
-        excluded.or(iterator);
-      }
+//      @Override
+//      public void visit(DocIdSetIterator iterator) throws IOException {
+//        excluded.or(iterator);
+//      }
 
       @Override
       public void visit(int docID, byte[] t) {
@@ -622,7 +620,7 @@ abstract class SpatialQuery extends Query {
   private static IntersectVisitor getInverseDenseVisitor(
       final SpatialVisitor spatialVisitor,
       final QueryRelation queryRelation,
-      final FixedBitSet result,
+      final FastSparseBitSet result,
       final long[] cost) {
     final BiFunction<byte[], byte[], Relation> innerFunction =
         spatialVisitor.getInnerFunction(queryRelation);
@@ -633,12 +631,6 @@ abstract class SpatialQuery extends Query {
       public void visit(int docID) {
         result.clear(docID);
         cost[0]--;
-      }
-
-      @Override
-      public void visit(DocIdSetIterator iterator) throws IOException {
-        result.andNot(iterator);
-        cost[0] = Math.max(0, cost[0] - iterator.cost());
       }
 
       @Override
@@ -672,7 +664,7 @@ abstract class SpatialQuery extends Query {
    * bitset; used with WITHIN & DISJOINT. This visitor only takes into account inner nodes
    */
   private static IntersectVisitor getShallowInverseDenseVisitor(
-      final SpatialVisitor spatialVisitor, QueryRelation queryRelation, final FixedBitSet result) {
+      final SpatialVisitor spatialVisitor, QueryRelation queryRelation, final FastSparseBitSet result) {
     final BiFunction<byte[], byte[], Relation> innerFunction =
         spatialVisitor.getInnerFunction(queryRelation);
     ;
@@ -681,11 +673,6 @@ abstract class SpatialQuery extends Query {
       @Override
       public void visit(int docID) {
         result.clear(docID);
-      }
-
-      @Override
-      public void visit(DocIdSetIterator iterator) throws IOException {
-        result.andNot(iterator);
       }
 
       @Override
@@ -753,5 +740,173 @@ abstract class SpatialQuery extends Query {
       return true;
     }
     return false;
+  }
+  
+  private static class FastSparseBitSet {
+    private static final int MASK_4096 = (1 << 12) - 1;
+    private static final int MASK_64 = (1 << 6) - 1;
+    private static final long[] ALLSET;
+    static {
+      ALLSET = new long[64];
+      Arrays.fill(ALLSET, Long.MAX_VALUE);
+    }
+
+    private static int blockCount(int length) {
+      int blockCount = length >>> 12;
+      if ((blockCount << 12) < length) {
+        ++blockCount;
+      }
+      assert (blockCount << 12) >= length;
+      return blockCount;
+    }
+
+    final long[][] bits;
+    final int length;
+    
+    FastSparseBitSet(int length) {
+      if (length < 1) {
+        throw new IllegalArgumentException("length needs to be >= 1");
+      }
+      this.length = length;
+      final int blockCount = blockCount(length);
+      bits = new long[blockCount][];
+    }
+    
+    public void setAll() {
+      int count = 0;
+      for (int i = 0; i < bits.length - 1; i++) {
+        bits[i] = ALLSET.clone();
+        count += 64;
+      }
+      assert 64 >= length - count;
+      for (int i = count; i < length; i++) {
+        set(i);
+      }
+    }
+
+    public int cardinality() {
+      int cardinality = 0;
+      for (long[] bitArray : bits) {
+        if (bitArray != null) {
+          for (long bits : bitArray) {
+            cardinality += Long.bitCount(bits);
+          }
+        }
+      }
+      return cardinality;
+    }
+
+    public boolean get(int i) {
+      //assert consistent(i);
+      final int i4096 = i >>> 12;
+      final long[] block = bits[i4096];
+      // first check the index, if the i64-th bit is not set, then i is not set
+      // note: this relies on the fact that shifts are mod 64 in java
+      if (block == null) {
+        return false;
+      }
+      final int i64 = (i & MASK_4096) >> 6;
+      return (block[i64] & 1L << i) != 0;
+    }
+
+    public void set(int i) {
+      final int i4096 = i >>> 12;
+      long[] block = bits[i4096];
+      if (block == null) {
+        block = new long[64];
+        bits[i4096] = block;
+      }
+      final int i64 = (i & MASK_4096) >> 6;
+      block[i64] |= 1L << i;
+    }
+
+    public void clear(int i) {
+      final int i4096 = i >>> 12;
+      final long[] block = bits[i4096];
+      if (block != null) {
+        final int i64 = (i & MASK_4096) >> 6;
+        block[i64] &= ~(1L << i);
+      }
+    }
+
+    public int nextSetBit(int i) {
+      assert i < length;
+      final int i4096 = i >>> 12;
+      final long[] bitArray = this.bits[i4096];
+      if (bitArray != null) {
+        final int i64 = (i & MASK_4096) >> 6;
+        long bits = bitArray[i64] >>> i;
+        if (bits != 0) {
+          // There is at least one bit that is set in the current long, check if
+          // one of them is after i
+          return i + Long.numberOfTrailingZeros(bits);
+        }
+        i += (MASK_64 & ~i) + 1;
+        for (int j = i64 + 1; j < 64; j++) {
+          bits = bitArray[j];
+          if (bits != 0) {
+            return i + Long.numberOfTrailingZeros(bits);
+          }
+          i += 64;
+        }
+      } else {
+        i += (MASK_4096 & ~i) + 1;
+      }
+
+      for (int j = i4096 + 1; j < this.bits.length; j++) {
+        long[] nextBlock  = this.bits[j];
+        if (nextBlock != null) {
+          for (int k = 0; k < 64; k++) {
+            long bits = nextBlock[k];
+            if (bits != 0) {
+              return i + Long.numberOfTrailingZeros(bits);
+            }
+            i += 64;
+          }
+        } else {
+          i += 4096;
+        }
+      }
+      return DocIdSetIterator.NO_MORE_DOCS;
+    }
+    
+    public DocIdSetIterator iterator(long cost) {
+      return new DocIdSetIterator() {
+        private int doc = -1;
+        @Override
+        public int docID() {
+          return doc;
+        }
+
+        @Override
+        public int nextDoc() throws IOException {
+          return advance(doc + 1);
+        }
+
+        @Override
+        public int advance(int target) {
+          if (target >= length) {
+            return doc = NO_MORE_DOCS;
+          }
+          return doc = nextSetBit(target);
+        }
+
+        @Override
+        public long cost() {
+          return cost;
+        }
+      };
+    }
+
+    public void andNot(FastSparseBitSet other) {
+      final int length = Math.min(bits.length, other.bits.length);
+      for (int i = 0; i < length; i++) {
+        if (bits[i] != null && other.bits[i] != null) {
+          for (int j = 0; j < 64; j++) {
+            bits[i][j] &= ~other.bits[i][j];
+          }
+        }
+      }
+    }
   }
 }
