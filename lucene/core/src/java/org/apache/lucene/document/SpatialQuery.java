@@ -790,45 +790,49 @@ abstract class SpatialQuery extends Query {
 
     public boolean get(int i) {
       final int i4096 = i >>> 12;
+      final long[] block = bits[i4096];
       // first check the index, if the i64-th bit is not set, then i is not set
-      if (bits[i4096] == null) {
+      if (block == null) {
          return false;
       }
       // note: this relies on the fact that shifts are mod 64 in java
       final int i64 = (i & MASK_4096) >> 6;
-      return (bits[i4096][i64] & 1L << i) != 0;
+      return (block[i64] & 1L << i) != 0;
     }
 
     public void set(int i) {
       final int i4096 = i >>> 12;
-      if (bits[i4096] == null) {
-        bits[i4096] = new long[64];
-      }
+      long[] block = bits[i4096];
+      if (block == null) {
+        bits[i4096] = block = new long[64];
+       }
       final int i64 = (i & MASK_4096) >> 6;
-      bits[i4096][i64] |= 1L << i;
+      block[i64] |= 1L << i;
     }
 
     public void clear(int i) {
       final int i4096 = i >>> 12;
-      if (bits[i4096] != null) {
+      final long[] block = bits[i4096];
+      if (block != null) {
         final int i64 = (i & MASK_4096) >> 6;
-        bits[i4096][i64] &= ~(1L << i);
+        block[i64] &= ~(1L << i);
       }
     }
 
     public int nextSetBit(int i) {
       assert i < length;
       int i4096 = i >>> 12;
-      if (this.bits[i4096] != null) {
+      final long[] block = this.bits[i4096];
+      if (block != null) {
         int i64 = (i & MASK_4096) >> 6;
-        long bits = this.bits[i4096][i64] >> i;  // skip all the bits to the right of index
+        long bits = block[i64] >> i;  // skip all the bits to the right of index
         if (bits != 0) {
           // There is at least one bit that is set in the current long, check if
           // one of them is after i
           return i + Long.numberOfTrailingZeros(bits);
         }
         while (++i64 < 64) {
-          bits = this.bits[i4096][i64];
+          bits = block[i64];
           if (bits != 0) {
             return (i4096 << 12) + (i64 << 6) + Long.numberOfTrailingZeros(bits);
           }
@@ -836,9 +840,10 @@ abstract class SpatialQuery extends Query {
       } 
       
       while (++i4096 < this.bits.length) {
-        if (this.bits[i4096] != null) {
+        final long[] nextBlock  = this.bits[i4096];
+        if (nextBlock != null) {
           for (int i64 = 0; i64 < 64; i64++) {
-            long bits = this.bits[i4096][i64];
+            long bits = nextBlock[i64];
             if (bits != 0) {
               return (i4096 << 12) + (i64 << 6) + Long.numberOfTrailingZeros(bits);
             }
