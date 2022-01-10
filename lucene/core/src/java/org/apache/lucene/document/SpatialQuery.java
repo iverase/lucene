@@ -762,14 +762,13 @@ abstract class SpatialQuery extends Query {
         throw new IllegalArgumentException("length needs to be >= 1");
       }
       this.length = length;
-      this.bits = new long[blockCount(length)][64];
+      this.bits = new long[blockCount(length)][];
     }
     
     public void setAll() {
       int i;
       for (i = 0; i < bits.length - 1; i++) {
-        //bits[i] = new long[64];
-        Arrays.fill(bits[i], Long.MAX_VALUE);
+        Arrays.fill(bits[i] = new long[64], Long.MAX_VALUE);
       }
       assert 4096 >= length - (i << 12);
       for (int j = i << 12; j < length; j++) {
@@ -780,71 +779,66 @@ abstract class SpatialQuery extends Query {
     public int cardinality() {
       int cardinality = 0;
       for (long[] bitArray : bits) {
-       // if (bitArray != null) {
+       if (bitArray != null) {
           for (long bits : bitArray) {
             cardinality += Long.bitCount(bits);
           }
-       // }
+       }
       }
       return cardinality;
     }
 
     public boolean get(int i) {
       final int i4096 = i >>> 12;
-      final long[] block = bits[i4096];
       // first check the index, if the i64-th bit is not set, then i is not set
-      //if (block == null) {
-      //  return false;
-     // }
+      if (bits[i4096] == null) {
+         return false;
+      }
       // note: this relies on the fact that shifts are mod 64 in java
       final int i64 = (i & MASK_4096) >> 6;
-      return (block[i64] & 1L << i) != 0;
+      return (bits[i4096][i64] & 1L << i) != 0;
     }
 
     public void set(int i) {
       final int i4096 = i >>> 12;
-      long[] block = bits[i4096];
-      //if (block == null) {
-      //  bits[i4096] = block = new long[64];
-      //}
+      if (bits[i4096] == null) {
+        bits[i4096] = new long[64];
+      }
       final int i64 = (i & MASK_4096) >> 6;
-      block[i64] |= 1L << i;
+      bits[i4096][i64] |= 1L << i;
     }
 
     public void clear(int i) {
       final int i4096 = i >>> 12;
-      final long[] block = bits[i4096];
-      //if (block != null) {
+      if (bits[i4096] != null) {
         final int i64 = (i & MASK_4096) >> 6;
-        block[i64] &= ~(1L << i);
-      //}
+        bits[i4096][i64] &= ~(1L << i);
+      }
     }
 
     public int nextSetBit(int i) {
       assert i < length;
       int i4096 = i >>> 12;
-      final long[] block = this.bits[i4096];
-      //if (block != null) {
+      if (this.bits[i4096] != null) {
         int i64 = (i & MASK_4096) >> 6;
-        long bits = block[i64] >> i;  // skip all the bits to the right of index
+        long bits = this.bits[i4096][i64] >> i;  // skip all the bits to the right of index
         if (bits != 0) {
           // There is at least one bit that is set in the current long, check if
           // one of them is after i
           return i + Long.numberOfTrailingZeros(bits);
         }
         while (++i64 < 64) {
-          bits = block[i64];
+          bits = this.bits[i4096][i64];
           if (bits != 0) {
             return (i4096 << 12) + (i64 << 6) + Long.numberOfTrailingZeros(bits);
           }
         }
-      //} 
+      } 
       
       while (++i4096 < this.bits.length) {
-        final long[] nextBlock  = this.bits[i4096];
-        if (nextBlock != null) {
-          for (i64 = 0; i64 < 64; i64++) {
-            bits = nextBlock[i64];
+        if (this.bits[i4096] != null) {
+          for (int i64 = 0; i64 < 64; i64++) {
+            long bits = this.bits[i4096][i64];
             if (bits != 0) {
               return (i4096 << 12) + (i64 << 6) + Long.numberOfTrailingZeros(bits);
             }
@@ -885,11 +879,11 @@ abstract class SpatialQuery extends Query {
     public void andNot(FastSparseBitSet other) {
       int length = Math.min(bits.length, other.bits.length);
       while (--length >= 0) {
-        //if (bits[length] != null && other.bits[length] != null) {
+        if (bits[length] != null && other.bits[length] != null) {
           for (int j = 0; j < 64; j++) {
             bits[length][j] &= ~other.bits[length][j];
           }
-       // }
+        }
       }
     }
   }
