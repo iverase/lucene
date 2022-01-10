@@ -803,11 +803,13 @@ abstract class SpatialQuery extends Query {
     public void set(int i) {
       final int i4096 = i >>> 12;
       long[] block = bits[i4096];
+      final int i64 = (i & MASK_4096) >> 6;
       if (block == null) {
         bits[i4096] = block = new long[64];
-       }
-      final int i64 = (i & MASK_4096) >> 6;
-      block[i64] |= 1L << i;
+        block[i64] = 1L << i;
+       } else {
+        block[i64] |= 1L << i;
+      }
     }
 
     public void clear(int i) {
