@@ -744,7 +744,6 @@ abstract class SpatialQuery extends Query {
   
   private static class FastSparseBitSet {
     private static final int MASK_4096 = (1 << 12) - 1;
-    private static final int MASK_64 = (1 << 6) - 1;
     private static final long[] ALLSET;
     static {
       ALLSET = new long[64];
@@ -773,14 +772,13 @@ abstract class SpatialQuery extends Query {
     }
     
     public void setAll() {
-      int count = 0;
-      for (int i = 0; i < bits.length - 1; i++) {
+      int i;
+      for (i = 0; i < bits.length - 1; i++) {
         bits[i] = ALLSET.clone();
-        count += 64;
       }
-      assert 64 >= length - count;
-      for (int i = count; i < length; i++) {
-        set(i);
+      assert 4096 >= length - (i << 12);
+      for (int j = i << 12; j < length; j++) {
+        set(j);
       }
     }
 
@@ -841,31 +839,24 @@ abstract class SpatialQuery extends Query {
           // one of them is after i
           return i + Long.numberOfTrailingZeros(bits);
         }
-        i += (MASK_64 & ~i) + 1;
         for (int j = i64 + 1; j < 64; j++) {
           bits = bitArray[j];
           if (bits != 0) {
-            return i + Long.numberOfTrailingZeros(bits);
+            return (i4096 << 12) + (j << 6) + Long.numberOfTrailingZeros(bits);
           }
-          i += 64;
         }
-      } else {
-        i += (MASK_4096 & ~i) + 1;
-      }
-
+      } 
+      
       for (int j = i4096 + 1; j < this.bits.length; j++) {
         long[] nextBlock  = this.bits[j];
         if (nextBlock != null) {
           for (int k = 0; k < 64; k++) {
             long bits = nextBlock[k];
             if (bits != 0) {
-              return i + Long.numberOfTrailingZeros(bits);
+              return (j << 12) + (k << 6) + Long.numberOfTrailingZeros(bits);
             }
-            i += 64;
           }
-        } else {
-          i += 4096;
-        }
+        } 
       }
       return DocIdSetIterator.NO_MORE_DOCS;
     }
