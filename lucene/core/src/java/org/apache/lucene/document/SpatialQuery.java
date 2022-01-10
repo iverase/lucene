@@ -811,8 +811,7 @@ abstract class SpatialQuery extends Query {
       final int i4096 = i >>> 12;
       long[] block = bits[i4096];
       if (block == null) {
-        block = new long[64];
-        bits[i4096] = block;
+        bits[i4096] = block = new long[64];
       }
       final int i64 = (i & MASK_4096) >> 6;
       block[i64] |= 1L << i;
@@ -829,31 +828,31 @@ abstract class SpatialQuery extends Query {
 
     public int nextSetBit(int i) {
       assert i < length;
-      final int i4096 = i >>> 12;
-      final long[] bitArray = this.bits[i4096];
-      if (bitArray != null) {
-        final int i64 = (i & MASK_4096) >> 6;
-        long bits = bitArray[i64] >>> i;
+      int i4096 = i >>> 12;
+      final long[] block = this.bits[i4096];
+      if (block != null) {
+        int i64 = (i & MASK_4096) >> 6;
+        long bits = block[i64] >> i;  // skip all the bits to the right of index
         if (bits != 0) {
           // There is at least one bit that is set in the current long, check if
           // one of them is after i
           return i + Long.numberOfTrailingZeros(bits);
         }
-        for (int j = i64 + 1; j < 64; j++) {
-          bits = bitArray[j];
+        while (++i64 < 64) {
+          bits = block[i64];
           if (bits != 0) {
-            return (i4096 << 12) + (j << 6) + Long.numberOfTrailingZeros(bits);
+            return (i4096 << 12) + (i64 << 6) + Long.numberOfTrailingZeros(bits);
           }
         }
       } 
       
-      for (int j = i4096 + 1; j < this.bits.length; j++) {
-        long[] nextBlock  = this.bits[j];
+      while (++i4096 < this.bits.length) {
+        final long[] nextBlock  = this.bits[i4096];
         if (nextBlock != null) {
-          for (int k = 0; k < 64; k++) {
-            long bits = nextBlock[k];
+          for (int i64 = 0; i64 < 64; i64++) {
+            long bits = nextBlock[i64];
             if (bits != 0) {
-              return (j << 12) + (k << 6) + Long.numberOfTrailingZeros(bits);
+              return (i4096 << 12) + (i64 << 6) + Long.numberOfTrailingZeros(bits);
             }
           }
         } 
@@ -870,7 +869,7 @@ abstract class SpatialQuery extends Query {
         }
 
         @Override
-        public int nextDoc() throws IOException {
+        public int nextDoc() {
           return advance(doc + 1);
         }
 
@@ -890,11 +889,11 @@ abstract class SpatialQuery extends Query {
     }
 
     public void andNot(FastSparseBitSet other) {
-      final int length = Math.min(bits.length, other.bits.length);
-      for (int i = 0; i < length; i++) {
-        if (bits[i] != null && other.bits[i] != null) {
+      int length = Math.min(bits.length, other.bits.length);
+      while (--length >= 0) {
+        if (bits[length] != null && other.bits[length] != null) {
           for (int j = 0; j < 64; j++) {
-            bits[i][j] &= ~other.bits[i][j];
+            bits[length][j] &= ~other.bits[length][j];
           }
         }
       }
