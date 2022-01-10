@@ -744,14 +744,7 @@ abstract class SpatialQuery extends Query {
   
   private static class FastSparseBitSet {
     private static final int MASK_4096 = (1 << 12) - 1;
-    private static final long[] ALLSET;
-    private static final long[] NONESET;
-    static {
-      NONESET = new long[64];
-      ALLSET = new long[64];
-      Arrays.fill(ALLSET, Long.MAX_VALUE);
-    }
-
+    
     private static int blockCount(int length) {
       int blockCount = length >>> 12;
       if ((blockCount << 12) < length) {
@@ -769,14 +762,14 @@ abstract class SpatialQuery extends Query {
         throw new IllegalArgumentException("length needs to be >= 1");
       }
       this.length = length;
-      final int blockCount = blockCount(length);
-      bits = new long[blockCount][];
+      this.bits = new long[blockCount(length)][64];
     }
     
     public void setAll() {
       int i;
       for (i = 0; i < bits.length - 1; i++) {
-        bits[i] = ALLSET.clone();
+        //bits[i] = new long[64];
+        Arrays.fill(bits[i], Long.MAX_VALUE);
       }
       assert 4096 >= length - (i << 12);
       for (int j = i << 12; j < length; j++) {
@@ -787,11 +780,11 @@ abstract class SpatialQuery extends Query {
     public int cardinality() {
       int cardinality = 0;
       for (long[] bitArray : bits) {
-        if (bitArray != null) {
+       // if (bitArray != null) {
           for (long bits : bitArray) {
             cardinality += Long.bitCount(bits);
           }
-        }
+       // }
       }
       return cardinality;
     }
@@ -800,9 +793,9 @@ abstract class SpatialQuery extends Query {
       final int i4096 = i >>> 12;
       final long[] block = bits[i4096];
       // first check the index, if the i64-th bit is not set, then i is not set
-      if (block == null) {
-        return false;
-      }
+      //if (block == null) {
+      //  return false;
+     // }
       // note: this relies on the fact that shifts are mod 64 in java
       final int i64 = (i & MASK_4096) >> 6;
       return (block[i64] & 1L << i) != 0;
@@ -811,9 +804,9 @@ abstract class SpatialQuery extends Query {
     public void set(int i) {
       final int i4096 = i >>> 12;
       long[] block = bits[i4096];
-      if (block == null) {
-        bits[i4096] = block = NONESET.clone();
-      }
+      //if (block == null) {
+      //  bits[i4096] = block = new long[64];
+      //}
       final int i64 = (i & MASK_4096) >> 6;
       block[i64] |= 1L << i;
     }
@@ -821,17 +814,17 @@ abstract class SpatialQuery extends Query {
     public void clear(int i) {
       final int i4096 = i >>> 12;
       final long[] block = bits[i4096];
-      if (block != null) {
+      //if (block != null) {
         final int i64 = (i & MASK_4096) >> 6;
         block[i64] &= ~(1L << i);
-      }
+      //}
     }
 
     public int nextSetBit(int i) {
       assert i < length;
       int i4096 = i >>> 12;
       final long[] block = this.bits[i4096];
-      if (block != null) {
+      //if (block != null) {
         int i64 = (i & MASK_4096) >> 6;
         long bits = block[i64] >> i;  // skip all the bits to the right of index
         if (bits != 0) {
@@ -845,13 +838,13 @@ abstract class SpatialQuery extends Query {
             return (i4096 << 12) + (i64 << 6) + Long.numberOfTrailingZeros(bits);
           }
         }
-      } 
+      //} 
       
       while (++i4096 < this.bits.length) {
         final long[] nextBlock  = this.bits[i4096];
         if (nextBlock != null) {
-          for (int i64 = 0; i64 < 64; i64++) {
-            long bits = nextBlock[i64];
+          for (i64 = 0; i64 < 64; i64++) {
+            bits = nextBlock[i64];
             if (bits != 0) {
               return (i4096 << 12) + (i64 << 6) + Long.numberOfTrailingZeros(bits);
             }
@@ -892,11 +885,11 @@ abstract class SpatialQuery extends Query {
     public void andNot(FastSparseBitSet other) {
       int length = Math.min(bits.length, other.bits.length);
       while (--length >= 0) {
-        if (bits[length] != null && other.bits[length] != null) {
+        //if (bits[length] != null && other.bits[length] != null) {
           for (int j = 0; j < 64; j++) {
             bits[length][j] &= ~other.bits[length][j];
           }
-        }
+       // }
       }
     }
   }
