@@ -745,7 +745,9 @@ abstract class SpatialQuery extends Query {
   private static class FastSparseBitSet {
     private static final int MASK_4096 = (1 << 12) - 1;
     private static final long[] ALLSET;
+    private static final long[] NONESET;
     static {
+      NONESET = new long[64];
       ALLSET = new long[64];
       Arrays.fill(ALLSET, Long.MAX_VALUE);
     }
@@ -795,14 +797,13 @@ abstract class SpatialQuery extends Query {
     }
 
     public boolean get(int i) {
-      //assert consistent(i);
       final int i4096 = i >>> 12;
       final long[] block = bits[i4096];
       // first check the index, if the i64-th bit is not set, then i is not set
-      // note: this relies on the fact that shifts are mod 64 in java
       if (block == null) {
         return false;
       }
+      // note: this relies on the fact that shifts are mod 64 in java
       final int i64 = (i & MASK_4096) >> 6;
       return (block[i64] & 1L << i) != 0;
     }
@@ -811,7 +812,7 @@ abstract class SpatialQuery extends Query {
       final int i4096 = i >>> 12;
       long[] block = bits[i4096];
       if (block == null) {
-        bits[i4096] = block = new long[64];
+        bits[i4096] = block = NONESET.clone();
       }
       final int i64 = (i & MASK_4096) >> 6;
       block[i64] |= 1L << i;
