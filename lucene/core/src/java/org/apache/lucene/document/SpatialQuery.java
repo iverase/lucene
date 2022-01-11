@@ -743,14 +743,14 @@ abstract class SpatialQuery extends Query {
   }
   
   private static class FastSparseBitSet {
-    private static final int MASK_4096 = (1 << 12) - 1;
+    private static final int MASK_4096 = (1 << 20) - 1;
     
     private static int blockCount(int length) {
-      int blockCount = length >>> 12;
-      if ((blockCount << 12) < length) {
+      int blockCount = length >>> 20;
+      if ((blockCount << 20) < length) {
         ++blockCount;
       }
-      assert (blockCount << 12) >= length;
+      assert (blockCount << 20) >= length;
       return blockCount;
     }
 
@@ -768,10 +768,10 @@ abstract class SpatialQuery extends Query {
     public void setAll() {
       int i;
       for (i = 0; i < bits.length - 1; i++) {
-        Arrays.fill(bits[i] = new long[64], Long.MAX_VALUE);
+        Arrays.fill(bits[i] = new long[1024], Long.MAX_VALUE);
       }
-      assert 4096 >= length - (i << 12);
-      for (int j = i << 12; j < length; j++) {
+      assert 1 << 20 >= length - (i << 20);
+      for (int j = i << 20; j < length; j++) {
         set(j);
       }
     }
@@ -789,7 +789,7 @@ abstract class SpatialQuery extends Query {
     }
 
     public boolean get(int i) {
-      final int i4096 = i >>> 12;
+      final int i4096 = i >>> 20;
       final long[] block = bits[i4096];
       // first check the index, if the i64-th bit is not set, then i is not set
       if (block == null) {
@@ -801,29 +801,31 @@ abstract class SpatialQuery extends Query {
     }
 
     public void set(int i) {
-      final int i4096 = i >>> 12;
+      final int i4096 = i >>> 20;
       long[] block = bits[i4096];
       final int i64 = (i & MASK_4096) >> 6;
       if (block == null) {
-        bits[i4096] = block = new long[64];
+        bits[i4096] = block = new long[1024];
         block[i64] = 1L << i;
        } else {
         block[i64] |= 1L << i;
       }
+      assert get(i);
     }
 
     public void clear(int i) {
-      final int i4096 = i >>> 12;
+      final int i4096 = i >>> 20;
       final long[] block = bits[i4096];
       if (block != null) {
         final int i64 = (i & MASK_4096) >> 6;
         block[i64] &= ~(1L << i);
       }
+      assert get(i) == false;
     }
 
     public int nextSetBit(int i) {
       assert i < length;
-      int i4096 = i >>> 12;
+      int i4096 = i >>> 20;
       final long[] block = this.bits[i4096];
       if (block != null) {
         int i64 = (i & MASK_4096) >> 6;
@@ -833,10 +835,10 @@ abstract class SpatialQuery extends Query {
           // one of them is after i
           return i + Long.numberOfTrailingZeros(bits);
         }
-        while (++i64 < 64) {
+        while (++i64 < 1024) {
           bits = block[i64];
           if (bits != 0) {
-            return (i4096 << 12) + (i64 << 6) + Long.numberOfTrailingZeros(bits);
+            return (i4096 << 20) + (i64 << 6) + Long.numberOfTrailingZeros(bits);
           }
         }
       } 
@@ -844,10 +846,10 @@ abstract class SpatialQuery extends Query {
       while (++i4096 < this.bits.length) {
         final long[] nextBlock  = this.bits[i4096];
         if (nextBlock != null) {
-          for (int i64 = 0; i64 < 64; i64++) {
+          for (int i64 = 0; i64 < 1024; i64++) {
             long bits = nextBlock[i64];
             if (bits != 0) {
-              return (i4096 << 12) + (i64 << 6) + Long.numberOfTrailingZeros(bits);
+              return (i4096 << 20) + (i64 << 6) + Long.numberOfTrailingZeros(bits);
             }
           }
         } 
@@ -887,7 +889,7 @@ abstract class SpatialQuery extends Query {
       int length = Math.min(bits.length, other.bits.length);
       while (--length >= 0) {
         if (bits[length] != null && other.bits[length] != null) {
-          for (int j = 0; j < 64; j++) {
+          for (int j = 0; j < 1024; j++) {
             bits[length][j] &= ~other.bits[length][j];
           }
         }
