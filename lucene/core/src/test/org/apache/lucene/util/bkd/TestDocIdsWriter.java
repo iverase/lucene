@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.IntSupplier;
 import org.apache.lucene.index.PointValues.IntersectVisitor;
 import org.apache.lucene.index.PointValues.Relation;
 import org.apache.lucene.store.Directory;
@@ -32,10 +33,15 @@ import org.apache.lucene.tests.util.TestUtil;
 public class TestDocIdsWriter extends LuceneTestCase {
 
   public void testRandom() throws Exception {
+    rand(() -> BKDConfig.DEFAULT_MAX_POINTS_IN_LEAF_NODE);
+    rand(() -> 1 + random().nextInt(5000));
+  }
+
+  private void rand(IntSupplier size) throws Exception {
     int numIters = atLeast(100);
     try (Directory dir = newDirectory()) {
       for (int iter = 0; iter < numIters; ++iter) {
-        int[] docIDs = new int[1 + random().nextInt(5000)];
+        int[] docIDs = new int[size.getAsInt()];
         final int bpv = TestUtil.nextInt(random(), 1, 32);
         for (int i = 0; i < docIDs.length; ++i) {
           docIDs[i] = TestUtil.nextInt(random(), 0, (1 << bpv) - 1);
@@ -46,15 +52,40 @@ public class TestDocIdsWriter extends LuceneTestCase {
   }
 
   public void testSorted() throws Exception {
+    sorted(() -> BKDConfig.DEFAULT_MAX_POINTS_IN_LEAF_NODE);
+    sorted(() -> 1 + random().nextInt(5000));
+  }
+
+  private void sorted(IntSupplier size) throws Exception {
     int numIters = atLeast(100);
     try (Directory dir = newDirectory()) {
       for (int iter = 0; iter < numIters; ++iter) {
-        int[] docIDs = new int[1 + random().nextInt(5000)];
+        int[] docIDs = new int[size.getAsInt()];
         final int bpv = TestUtil.nextInt(random(), 1, 32);
         for (int i = 0; i < docIDs.length; ++i) {
           docIDs[i] = TestUtil.nextInt(random(), 0, (1 << bpv) - 1);
         }
         Arrays.sort(docIDs);
+        test(dir, docIDs);
+      }
+    }
+  }
+
+  public void testCluster() throws Exception {
+    cluster(() -> BKDConfig.DEFAULT_MAX_POINTS_IN_LEAF_NODE);
+    cluster(() -> 1 + random().nextInt(5000));
+  }
+
+  private void cluster(IntSupplier size) throws Exception {
+    int numIters = atLeast(100);
+    try (Directory dir = newDirectory()) {
+      for (int iter = 0; iter < numIters; ++iter) {
+        int[] docIDs = new int[size.getAsInt()];
+        int min = random().nextInt(1000);
+        final int bpv = TestUtil.nextInt(random(), 1, 16);
+        for (int i = 0; i < docIDs.length; ++i) {
+          docIDs[i] = min + TestUtil.nextInt(random(), 0, (1 << bpv) - 1);
+        }
         test(dir, docIDs);
       }
     }
@@ -93,8 +124,9 @@ public class TestDocIdsWriter extends LuceneTestCase {
 
   private void test(Directory dir, int[] ints) throws Exception {
     final long len;
+    DocIdsWriter docIdsWriter = new DocIdsWriter(ints.length);
     try (IndexOutput out = dir.createOutput("tmp", IOContext.DEFAULT)) {
-      DocIdsWriter.writeDocIds(ints, 0, ints.length, out);
+      docIdsWriter.writeDocIds(ints, 0, ints.length, out);
       len = out.getFilePointer();
       if (random().nextBoolean()) {
         out.writeLong(0); // garbage
@@ -102,13 +134,13 @@ public class TestDocIdsWriter extends LuceneTestCase {
     }
     try (IndexInput in = dir.openInput("tmp", IOContext.READONCE)) {
       int[] read = new int[ints.length];
-      DocIdsWriter.readInts(in, ints.length, read);
+      docIdsWriter.readInts(in, ints.length, read);
       assertArrayEquals(ints, read);
       assertEquals(len, in.getFilePointer());
     }
     try (IndexInput in = dir.openInput("tmp", IOContext.READONCE)) {
       int[] read = new int[ints.length];
-      DocIdsWriter.readInts(
+      docIdsWriter.readInts(
           in,
           ints.length,
           new IntersectVisitor() {
