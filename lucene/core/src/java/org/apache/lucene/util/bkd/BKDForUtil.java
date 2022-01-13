@@ -99,22 +99,4 @@ final class BKDForUtil {
     }
     in.readInts(ints, quarterLen << 2, len & 0x3);
   }
-
-  void decode24(DataInput in, PointValues.IntersectVisitor visitor, int len) throws IOException {
-    final int quarterLen = len >>> 2;
-    final int quarterLen3 = quarterLen * 3;
-    in.readInts(tmp, 0, quarterLen3);
-    for (int i = 0; i < quarterLen3; ++i) {
-      visitor.visit(tmp[i] >>> 8);
-    }
-    for (int i = 0; i < quarterLen; i++) {
-      visitor.visit(
-              ((tmp[i] & 0xFF) << 16)
-                      | ((tmp[i + quarterLen] & 0xFF) << 8)
-                      | (tmp[i + quarterLen * 2] & 0xFF));
-    }
-    for (int i = 0; i < (len & 0x3); i++) {
-      visitor.visit(in.readInt());
-    }
-  }
 }
