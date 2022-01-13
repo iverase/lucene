@@ -315,10 +315,7 @@ final class DocIdsWriter {
   }
 
   private void readInts24(IndexInput in, int count, IntersectVisitor visitor) throws IOException {
-    forUtil.decode24(in, scratch, count);
-    for (int i = 0; i < count; i++) {
-      visitor.visit(scratch[i]);
-    }
+    forUtil.decode24(in, visitor, count);
   }
 
   private void readInts32(IndexInput in, int count, IntersectVisitor visitor) throws IOException {
