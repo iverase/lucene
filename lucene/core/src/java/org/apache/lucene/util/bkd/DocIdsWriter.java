@@ -232,6 +232,7 @@ final class DocIdsWriter {
    */
   void readInts(IndexInput in, int count, IntersectVisitor visitor) throws IOException {
     final int bpv = in.readByte();
+    System.out.println(bpv);
     switch (bpv) {
       case CONTINUOUS_IDS:
         readContinuousIds(in, count, visitor);
