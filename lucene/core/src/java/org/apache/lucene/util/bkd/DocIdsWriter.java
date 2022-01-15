@@ -132,6 +132,7 @@ final class DocIdsWriter {
   /** Read {@code count} integers into {@code docIDs}. */
   void readInts(IndexInput in, int count, int[] docIDs) throws IOException {
     final int bpv = in.readByte();
+    System.out.println("docs " + bpv);
     switch (bpv) {
       case CONTINUOUS_IDS:
         readContinuousIds(in, count, docIDs);
@@ -232,7 +233,7 @@ final class DocIdsWriter {
    */
   void readInts(IndexInput in, int count, IntersectVisitor visitor) throws IOException {
     final int bpv = in.readByte();
-    System.out.println(bpv);
+    System.out.println("visitor " + bpv);
     switch (bpv) {
       case CONTINUOUS_IDS:
         readContinuousIds(in, count, visitor);
