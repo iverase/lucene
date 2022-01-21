@@ -44,6 +44,8 @@ public class BKDReader extends PointValues {
   final long minLeafBlockFP;
 
   final IndexInput packedIndex;
+  // if true, the tree is a legacy balanced tree
+  private final boolean isTreeBalanced;
 
   /**
    * Caller must pre-seek the provided {@link IndexInput} to the index location that {@link
@@ -51,8 +53,8 @@ public class BKDReader extends PointValues {
    */
   public BKDReader(IndexInput metaIn, IndexInput indexIn, IndexInput dataIn) throws IOException {
     version =
-        CodecUtil.checkHeader(
-            metaIn, BKDWriter.CODEC_NAME, BKDWriter.VERSION_START, BKDWriter.VERSION_CURRENT);
+            CodecUtil.checkHeader(
+                    metaIn, BKDWriter.CODEC_NAME, BKDWriter.VERSION_START, BKDWriter.VERSION_CURRENT);
     final int numDims = metaIn.readVInt();
     final int numIndexDims;
     if (version >= BKDWriter.VERSION_SELECTIVE_INDEXING) {
@@ -74,19 +76,19 @@ public class BKDReader extends PointValues {
     metaIn.readBytes(minPackedValue, 0, config.packedIndexBytesLength);
     metaIn.readBytes(maxPackedValue, 0, config.packedIndexBytesLength);
     final ArrayUtil.ByteArrayComparator comparator =
-        ArrayUtil.getUnsignedComparator(config.bytesPerDim);
+            ArrayUtil.getUnsignedComparator(config.bytesPerDim);
     for (int dim = 0; dim < config.numIndexDims; dim++) {
       if (comparator.compare(
               minPackedValue, dim * config.bytesPerDim, maxPackedValue, dim * config.bytesPerDim)
-          > 0) {
+              > 0) {
         throw new CorruptIndexException(
-            "minPackedValue "
-                + new BytesRef(minPackedValue)
-                + " is > maxPackedValue "
-                + new BytesRef(maxPackedValue)
-                + " for dim="
-                + dim,
-            metaIn);
+                "minPackedValue "
+                        + new BytesRef(minPackedValue)
+                        + " is > maxPackedValue "
+                        + new BytesRef(maxPackedValue)
+                        + " for dim="
+                        + dim,
+                metaIn);
       }
     }
 
@@ -105,19 +107,66 @@ public class BKDReader extends PointValues {
     }
     this.packedIndex = indexIn.slice("packedIndex", indexStartPointer, numIndexBytes);
     this.in = dataIn;
+    // for only one leaf, balanced and unbalanced trees can be handled the same way
+    // we set it to unbalanced.
+    this.isTreeBalanced = numLeaves != 1 && isTreeBalanced();
+  }
+
+  private boolean isTreeBalanced() throws IOException {
+    if (version >= BKDWriter.VERSION_META_FILE) {
+      // since lucene 8.6 all trees are unbalanced.
+      return false;
+    }
+    if (config.numDims > 1) {
+      // high dimensional tree in pre-8.6 indices are balanced.
+      assert 1 << MathUtil.log(numLeaves, 2) == numLeaves;
+      return true;
+    }
+    if (1 << MathUtil.log(numLeaves, 2) != numLeaves) {
+      // if we don't have enough leaves to fill the last level then it is unbalanced
+      return false;
+    }
+    // count of the last node for unbalanced trees
+    final int lastLeafNodePointCount = Math.toIntExact(pointCount % config.maxPointsInLeafNode);
+    // navigate to last node
+    PointTree pointTree = getPointTree();
+    do {
+      while (pointTree.moveToSibling()) {}
+    } while (pointTree.moveToChild());
+    // count number of docs in the node
+    final int[] count = new int[] {0};
+    pointTree.visitDocIDs(
+            new IntersectVisitor() {
+              @Override
+              public void visit(int docID) {
+                count[0]++;
+              }
+
+              @Override
+              public void visit(int docID, byte[] packedValue) {
+                throw new AssertionError();
+              }
+
+              @Override
+              public Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
+                throw new AssertionError();
+              }
+            });
+    return count[0] != lastLeafNodePointCount;
   }
 
   @Override
   public PointTree getPointTree() throws IOException {
     return new BKDPointTree(
-        packedIndex.clone(),
-        this.in.clone(),
-        config,
-        numLeaves,
-        version,
-        pointCount,
-        minPackedValue,
-        maxPackedValue);
+            packedIndex.clone(),
+            this.in.clone(),
+            config,
+            numLeaves,
+            version,
+            pointCount,
+            minPackedValue,
+            maxPackedValue,
+            isTreeBalanced);
   }
 
   private static class BKDPointTree implements PointTree {
@@ -164,63 +213,70 @@ public class BKDReader extends PointValues {
     private final int rightMostLeafNode;
     // helper objects for reading doc values
     private final byte[] scratchDataPackedValue,
-        scratchMinIndexPackedValue,
-        scratchMaxIndexPackedValue;
+            scratchMinIndexPackedValue,
+            scratchMaxIndexPackedValue;
     private final int[] commonPrefixLengths;
     private final BKDReaderDocIDSetIterator scratchIterator;
     private final DocIdsWriter docIdsWriter;
+    // if true the tree is balanced, otherwise unbalanced
+    private final boolean isTreeBalanced;
+
 
     private BKDPointTree(
-        IndexInput innerNodes,
-        IndexInput leafNodes,
-        BKDConfig config,
-        int numLeaves,
-        int version,
-        long pointCount,
-        byte[] minPackedValue,
-        byte[] maxPackedValue)
-        throws IOException {
+            IndexInput innerNodes,
+            IndexInput leafNodes,
+            BKDConfig config,
+            int numLeaves,
+            int version,
+            long pointCount,
+            byte[] minPackedValue,
+            byte[] maxPackedValue,
+            boolean isTreeBalanced)
+            throws IOException {
       this(
-          innerNodes,
-          leafNodes,
-          config,
-          numLeaves,
-          version,
-          pointCount,
-          1,
-          1,
-          minPackedValue,
-          maxPackedValue,
-          new BKDReaderDocIDSetIterator(config.maxPointsInLeafNode),
-          new byte[config.packedBytesLength],
-          new byte[config.packedIndexBytesLength],
-          new byte[config.packedIndexBytesLength],
-          new int[config.numDims]);
+              innerNodes,
+              leafNodes,
+              config,
+              numLeaves,
+              version,
+              pointCount,
+              1,
+              1,
+              minPackedValue,
+              maxPackedValue,
+              new BKDReaderDocIDSetIterator(config.maxPointsInLeafNode),
+              new byte[config.packedBytesLength],
+              new byte[config.packedIndexBytesLength],
+              new byte[config.packedIndexBytesLength],
+              new int[config.numDims],
+              isTreeBalanced);
       // read root node
       readNodeData(false);
     }
 
     private BKDPointTree(
-        IndexInput innerNodes,
-        IndexInput leafNodes,
-        BKDConfig config,
-        int numLeaves,
-        int version,
-        long pointCount,
-        int nodeID,
-        int level,
-        byte[] minPackedValue,
-        byte[] maxPackedValue,
-        BKDReaderDocIDSetIterator scratchIterator,
-        byte[] scratchDataPackedValue,
-        byte[] scratchMinIndexPackedValue,
-        byte[] scratchMaxIndexPackedValue,
-        int[] commonPrefixLengths) {
+            IndexInput innerNodes,
+            IndexInput leafNodes,
+            BKDConfig config,
+            int numLeaves,
+            int version,
+            long pointCount,
+            int nodeID,
+            int level,
+            byte[] minPackedValue,
+            byte[] maxPackedValue,
+            BKDReaderDocIDSetIterator scratchIterator,
+            byte[] scratchDataPackedValue,
+            byte[] scratchMinIndexPackedValue,
+            byte[] scratchMaxIndexPackedValue,
+            int[] commonPrefixLengths,
+            boolean isTreeBalanced) {
       this.config = config;
       this.version = version;
       this.nodeID = nodeID;
       this.nodeRoot = nodeID;
       this.level = level;
+      this.isTreeBalanced = isTreeBalanced;
       leafNodeOffset = numLeaves;
       this.innerNodes = innerNodes;
       this.leafNodes = leafNodes;
@@ -241,7 +297,7 @@ public class BKDReader extends PointValues {
       rightMostLeafNode = (1 << treeDepth - 1) - 1;
       int lastLeafNodePointCount = Math.toIntExact(pointCount % config.maxPointsInLeafNode);
       this.lastLeafNodePointCount =
-          lastLeafNodePointCount == 0 ? config.maxPointsInLeafNode : lastLeafNodePointCount;
+              lastLeafNodePointCount == 0 ? config.maxPointsInLeafNode : lastLeafNodePointCount;
       // scratch objects, reused between clones so NN search are not creating those objects
       // in every clone.
       this.scratchIterator = scratchIterator;
@@ -255,22 +311,23 @@ public class BKDReader extends PointValues {
     @Override
     public PointTree clone() {
       BKDPointTree index =
-          new BKDPointTree(
-              innerNodes.clone(),
-              leafNodes.clone(),
-              config,
-              leafNodeOffset,
-              version,
-              pointCount,
-              nodeID,
-              level,
-              minPackedValue,
-              maxPackedValue,
-              scratchIterator,
-              scratchDataPackedValue,
-              scratchMinIndexPackedValue,
-              scratchMaxIndexPackedValue,
-              commonPrefixLengths);
+              new BKDPointTree(
+                      innerNodes.clone(),
+                      leafNodes.clone(),
+                      config,
+                      leafNodeOffset,
+                      version,
+                      pointCount,
+                      nodeID,
+                      level,
+                      minPackedValue,
+                      maxPackedValue,
+                      scratchIterator,
+                      scratchDataPackedValue,
+                      scratchMinIndexPackedValue,
+                      scratchMaxIndexPackedValue,
+                      commonPrefixLengths,
+                      isTreeBalanced);
       index.leafBlockFPStack[index.level] = leafBlockFPStack[level];
       if (isLeafNode() == false) {
         // copy node data
@@ -278,11 +335,11 @@ public class BKDReader extends PointValues {
         index.readNodeDataPositions[index.level] = readNodeDataPositions[level];
         index.splitValuesStack[index.level] = splitValuesStack[level].clone();
         System.arraycopy(
-            negativeDeltas,
-            level * config.numIndexDims,
-            index.negativeDeltas,
-            level * config.numIndexDims,
-            config.numIndexDims);
+                negativeDeltas,
+                level * config.numIndexDims,
+                index.negativeDeltas,
+                level * config.numIndexDims,
+                config.numIndexDims);
         index.splitDimsPos[level] = splitDimsPos[level];
       }
       return index;
@@ -322,11 +379,11 @@ public class BKDReader extends PointValues {
       }
       // save the dimension we are going to change
       System.arraycopy(
-          maxPackedValue, splitDimPos, splitDimValueStack[level], 0, config.bytesPerDim);
+              maxPackedValue, splitDimPos, splitDimValueStack[level], 0, config.bytesPerDim);
       assert ArrayUtil.getUnsignedComparator(config.bytesPerDim)
-                  .compare(maxPackedValue, splitDimPos, splitValuesStack[level], splitDimPos)
+              .compare(maxPackedValue, splitDimPos, splitValuesStack[level], splitDimPos)
               >= 0
-          : "config.bytesPerDim="
+              : "config.bytesPerDim="
               + config.bytesPerDim
               + " splitDimPos="
               + splitDimsPos[level]
@@ -336,7 +393,7 @@ public class BKDReader extends PointValues {
               + config.numDims;
       // add the split dim value:
       System.arraycopy(
-          splitValuesStack[level], splitDimPos, maxPackedValue, splitDimPos, config.bytesPerDim);
+              splitValuesStack[level], splitDimPos, maxPackedValue, splitDimPos, config.bytesPerDim);
     }
 
     private void pushLeft() throws IOException {
@@ -351,11 +408,11 @@ public class BKDReader extends PointValues {
       assert splitDimValueStack[level] != null;
       // save the dimension we are going to change
       System.arraycopy(
-          minPackedValue, splitDimPos, splitDimValueStack[level], 0, config.bytesPerDim);
+              minPackedValue, splitDimPos, splitDimValueStack[level], 0, config.bytesPerDim);
       assert ArrayUtil.getUnsignedComparator(config.bytesPerDim)
-                  .compare(minPackedValue, splitDimPos, splitValuesStack[level], splitDimPos)
+              .compare(minPackedValue, splitDimPos, splitValuesStack[level], splitDimPos)
               <= 0
-          : "config.bytesPerDim="
+              : "config.bytesPerDim="
               + config.bytesPerDim
               + " splitDimPos="
               + splitDimsPos[level]
@@ -365,13 +422,13 @@ public class BKDReader extends PointValues {
               + config.numDims;
       // add the split dim value:
       System.arraycopy(
-          splitValuesStack[level], splitDimPos, minPackedValue, splitDimPos, config.bytesPerDim);
+              splitValuesStack[level], splitDimPos, minPackedValue, splitDimPos, config.bytesPerDim);
     }
 
     private void pushRight() throws IOException {
       final int nodePosition = rightNodePositions[level];
       assert nodePosition >= innerNodes.getFilePointer()
-          : "nodePosition = " + nodePosition + " < currentPosition=" + innerNodes.getFilePointer();
+              : "nodePosition = " + nodePosition + " < currentPosition=" + innerNodes.getFilePointer();
       innerNodes.seek(nodePosition);
       nodeID = 2 * nodeID + 1;
       level++;
@@ -399,7 +456,7 @@ public class BKDReader extends PointValues {
     private void popBounds(byte[] packedValue) {
       // restore the split dimension
       System.arraycopy(
-          splitDimValueStack[level], 0, packedValue, splitDimsPos[level], config.bytesPerDim);
+              splitDimValueStack[level], 0, packedValue, splitDimsPos[level], config.bytesPerDim);
     }
 
     @Override
@@ -454,20 +511,20 @@ public class BKDReader extends PointValues {
         numLeaves = rightMostLeafNode - leftMostLeafNode + 1 + leafNodeOffset;
       }
       assert numLeaves == getNumLeavesSlow(nodeID) : numLeaves + " " + getNumLeavesSlow(nodeID);
-      if (version < BKDWriter.VERSION_META_FILE && config.numDims > 1) {
-        // before lucene 8.6, high dimensional trees were constructed as fully balanced trees.
+      if (isTreeBalanced) {
+        // before lucene 8.6, trees might have been constructed as fully balanced trees.
         return sizeFromBalancedTree(leftMostLeafNode, rightMostLeafNode);
       }
       // size for an unbalanced tree.
       return rightMostLeafNode == this.rightMostLeafNode
-          ? (long) (numLeaves - 1) * config.maxPointsInLeafNode + lastLeafNodePointCount
-          : (long) numLeaves * config.maxPointsInLeafNode;
+              ? (long) (numLeaves - 1) * config.maxPointsInLeafNode + lastLeafNodePointCount
+              : (long) numLeaves * config.maxPointsInLeafNode;
     }
 
     private long sizeFromBalancedTree(int leftMostLeafNode, int rightMostLeafNode) {
       // number of points that need to be distributed between leaves, one per leaf
       final int extraPoints =
-          Math.toIntExact(((long) config.maxPointsInLeafNode * this.leafNodeOffset) - pointCount);
+              Math.toIntExact(((long) config.maxPointsInLeafNode * this.leafNodeOffset) - pointCount);
       assert extraPoints < leafNodeOffset : "point excess should be lower than leafNodeOffset";
       // offset where we stop adding one point to the leaves
       final int nodeOffset = leafNodeOffset - extraPoints;
@@ -484,7 +541,7 @@ public class BKDReader extends PointValues {
     }
 
     private int balanceTreeNodePosition(
-        int minNode, int maxNode, int node, int position, int level) {
+            int minNode, int maxNode, int node, int position, int level) {
       if (maxNode - minNode == 1) {
         return position;
       }
@@ -552,29 +609,29 @@ public class BKDReader extends PointValues {
       int count = readDocIDs(leafNodes, fp, scratchIterator);
       if (version >= BKDWriter.VERSION_LOW_CARDINALITY_LEAVES) {
         visitDocValuesWithCardinality(
-            commonPrefixLengths,
-            scratchDataPackedValue,
-            scratchMinIndexPackedValue,
-            scratchMaxIndexPackedValue,
-            leafNodes,
-            scratchIterator,
-            count,
-            visitor);
+                commonPrefixLengths,
+                scratchDataPackedValue,
+                scratchMinIndexPackedValue,
+                scratchMaxIndexPackedValue,
+                leafNodes,
+                scratchIterator,
+                count,
+                visitor);
       } else {
         visitDocValuesNoCardinality(
-            commonPrefixLengths,
-            scratchDataPackedValue,
-            scratchMinIndexPackedValue,
-            scratchMaxIndexPackedValue,
-            leafNodes,
-            scratchIterator,
-            count,
-            visitor);
+                commonPrefixLengths,
+                scratchDataPackedValue,
+                scratchMinIndexPackedValue,
+                scratchMaxIndexPackedValue,
+                leafNodes,
+                scratchIterator,
+                count,
+                visitor);
       }
     }
 
     private int readDocIDs(IndexInput in, long blockFP, BKDReaderDocIDSetIterator iterator)
-        throws IOException {
+            throws IOException {
       in.seek(blockFP);
       // How many points are stored in this leaf cell:
       int count = in.readVInt();
@@ -606,24 +663,24 @@ public class BKDReader extends PointValues {
 
       if (isLeafNode() == false) {
         System.arraycopy(
-            negativeDeltas,
-            (level - 1) * config.numIndexDims,
-            negativeDeltas,
-            level * config.numIndexDims,
-            config.numIndexDims);
+                negativeDeltas,
+                (level - 1) * config.numIndexDims,
+                negativeDeltas,
+                level * config.numIndexDims,
+                config.numIndexDims);
         negativeDeltas[
                 level * config.numIndexDims + (splitDimsPos[level - 1] / config.bytesPerDim)] =
-            isLeft;
+                isLeft;
 
         if (splitValuesStack[level] == null) {
           splitValuesStack[level] = splitValuesStack[level - 1].clone();
         } else {
           System.arraycopy(
-              splitValuesStack[level - 1],
-              0,
-              splitValuesStack[level],
-              0,
-              config.packedIndexBytesLength);
+                  splitValuesStack[level - 1],
+                  0,
+                  splitValuesStack[level],
+                  0,
+                  config.packedIndexBytesLength);
         }
 
         // read split dim, prefix, firstDiffByteDelta encoded as int:
@@ -670,20 +727,20 @@ public class BKDReader extends PointValues {
     }
 
     private void visitDocValuesNoCardinality(
-        int[] commonPrefixLengths,
-        byte[] scratchDataPackedValue,
-        byte[] scratchMinIndexPackedValue,
-        byte[] scratchMaxIndexPackedValue,
-        IndexInput in,
-        BKDReaderDocIDSetIterator scratchIterator,
-        int count,
-        PointValues.IntersectVisitor visitor)
-        throws IOException {
+            int[] commonPrefixLengths,
+            byte[] scratchDataPackedValue,
+            byte[] scratchMinIndexPackedValue,
+            byte[] scratchMaxIndexPackedValue,
+            IndexInput in,
+            BKDReaderDocIDSetIterator scratchIterator,
+            int count,
+            PointValues.IntersectVisitor visitor)
+            throws IOException {
       readCommonPrefixes(commonPrefixLengths, scratchDataPackedValue, in);
       if (config.numIndexDims != 1 && version >= BKDWriter.VERSION_LEAF_STORES_BOUNDS) {
         byte[] minPackedValue = scratchMinIndexPackedValue;
         System.arraycopy(
-            scratchDataPackedValue, 0, minPackedValue, 0, config.packedIndexBytesLength);
+                scratchDataPackedValue, 0, minPackedValue, 0, config.packedIndexBytesLength);
         byte[] maxPackedValue = scratchMaxIndexPackedValue;
         // Copy common prefixes before reading adjusted box
         System.arraycopy(minPackedValue, 0, maxPackedValue, 0, config.packedIndexBytesLength);
@@ -716,26 +773,26 @@ public class BKDReader extends PointValues {
         visitUniqueRawDocValues(scratchDataPackedValue, scratchIterator, count, visitor);
       } else {
         visitCompressedDocValues(
-            commonPrefixLengths,
-            scratchDataPackedValue,
-            in,
-            scratchIterator,
-            count,
-            visitor,
-            compressedDim);
+                commonPrefixLengths,
+                scratchDataPackedValue,
+                in,
+                scratchIterator,
+                count,
+                visitor,
+                compressedDim);
       }
     }
 
     private void visitDocValuesWithCardinality(
-        int[] commonPrefixLengths,
-        byte[] scratchDataPackedValue,
-        byte[] scratchMinIndexPackedValue,
-        byte[] scratchMaxIndexPackedValue,
-        IndexInput in,
-        BKDReaderDocIDSetIterator scratchIterator,
-        int count,
-        PointValues.IntersectVisitor visitor)
-        throws IOException {
+            int[] commonPrefixLengths,
+            byte[] scratchDataPackedValue,
+            byte[] scratchMinIndexPackedValue,
+            byte[] scratchMaxIndexPackedValue,
+            IndexInput in,
+            BKDReaderDocIDSetIterator scratchIterator,
+            int count,
+            PointValues.IntersectVisitor visitor)
+            throws IOException {
 
       readCommonPrefixes(commonPrefixLengths, scratchDataPackedValue, in);
       int compressedDim = readCompressedDim(in);
@@ -747,7 +804,7 @@ public class BKDReader extends PointValues {
         if (config.numIndexDims != 1) {
           byte[] minPackedValue = scratchMinIndexPackedValue;
           System.arraycopy(
-              scratchDataPackedValue, 0, minPackedValue, 0, config.packedIndexBytesLength);
+                  scratchDataPackedValue, 0, minPackedValue, 0, config.packedIndexBytesLength);
           byte[] maxPackedValue = scratchMaxIndexPackedValue;
           // Copy common prefixes before reading adjusted box
           System.arraycopy(minPackedValue, 0, maxPackedValue, 0, config.packedIndexBytesLength);
@@ -778,49 +835,49 @@ public class BKDReader extends PointValues {
         if (compressedDim == -2) {
           // low cardinality values
           visitSparseRawDocValues(
-              commonPrefixLengths, scratchDataPackedValue, in, scratchIterator, count, visitor);
+                  commonPrefixLengths, scratchDataPackedValue, in, scratchIterator, count, visitor);
         } else {
           // high cardinality
           visitCompressedDocValues(
-              commonPrefixLengths,
-              scratchDataPackedValue,
-              in,
-              scratchIterator,
-              count,
-              visitor,
-              compressedDim);
+                  commonPrefixLengths,
+                  scratchDataPackedValue,
+                  in,
+                  scratchIterator,
+                  count,
+                  visitor,
+                  compressedDim);
         }
       }
     }
 
     private void readMinMax(
-        int[] commonPrefixLengths, byte[] minPackedValue, byte[] maxPackedValue, IndexInput in)
-        throws IOException {
+            int[] commonPrefixLengths, byte[] minPackedValue, byte[] maxPackedValue, IndexInput in)
+            throws IOException {
       for (int dim = 0; dim < config.numIndexDims; dim++) {
         int prefix = commonPrefixLengths[dim];
         in.readBytes(
-            minPackedValue, dim * config.bytesPerDim + prefix, config.bytesPerDim - prefix);
+                minPackedValue, dim * config.bytesPerDim + prefix, config.bytesPerDim - prefix);
         in.readBytes(
-            maxPackedValue, dim * config.bytesPerDim + prefix, config.bytesPerDim - prefix);
+                maxPackedValue, dim * config.bytesPerDim + prefix, config.bytesPerDim - prefix);
       }
     }
 
     // read cardinality and point
     private void visitSparseRawDocValues(
-        int[] commonPrefixLengths,
-        byte[] scratchPackedValue,
-        IndexInput in,
-        BKDReaderDocIDSetIterator scratchIterator,
-        int count,
-        PointValues.IntersectVisitor visitor)
-        throws IOException {
+            int[] commonPrefixLengths,
+            byte[] scratchPackedValue,
+            IndexInput in,
+            BKDReaderDocIDSetIterator scratchIterator,
+            int count,
+            PointValues.IntersectVisitor visitor)
+            throws IOException {
       int i;
       for (i = 0; i < count; ) {
         int length = in.readVInt();
         for (int dim = 0; dim < config.numDims; dim++) {
           int prefix = commonPrefixLengths[dim];
           in.readBytes(
-              scratchPackedValue, dim * config.bytesPerDim + prefix, config.bytesPerDim - prefix);
+                  scratchPackedValue, dim * config.bytesPerDim + prefix, config.bytesPerDim - prefix);
         }
         scratchIterator.reset(i, length);
         visitor.visit(scratchIterator, scratchPackedValue);
@@ -828,34 +885,34 @@ public class BKDReader extends PointValues {
       }
       if (i != count) {
         throw new CorruptIndexException(
-            "Sub blocks do not add up to the expected count: " + count + " != " + i, in);
+                "Sub blocks do not add up to the expected count: " + count + " != " + i, in);
       }
     }
 
     // point is under commonPrefix
     private void visitUniqueRawDocValues(
-        byte[] scratchPackedValue,
-        BKDReaderDocIDSetIterator scratchIterator,
-        int count,
-        PointValues.IntersectVisitor visitor)
-        throws IOException {
+            byte[] scratchPackedValue,
+            BKDReaderDocIDSetIterator scratchIterator,
+            int count,
+            PointValues.IntersectVisitor visitor)
+            throws IOException {
       scratchIterator.reset(0, count);
       visitor.visit(scratchIterator, scratchPackedValue);
     }
 
     private void visitCompressedDocValues(
-        int[] commonPrefixLengths,
-        byte[] scratchPackedValue,
-        IndexInput in,
-        BKDReaderDocIDSetIterator scratchIterator,
-        int count,
-        PointValues.IntersectVisitor visitor,
-        int compressedDim)
-        throws IOException {
+            int[] commonPrefixLengths,
+            byte[] scratchPackedValue,
+            IndexInput in,
+            BKDReaderDocIDSetIterator scratchIterator,
+            int count,
+            PointValues.IntersectVisitor visitor,
+            int compressedDim)
+            throws IOException {
       // the byte at `compressedByteOffset` is compressed using run-length compression,
       // other suffix bytes are stored verbatim
       final int compressedByteOffset =
-          compressedDim * config.bytesPerDim + commonPrefixLengths[compressedDim];
+              compressedDim * config.bytesPerDim + commonPrefixLengths[compressedDim];
       commonPrefixLengths[compressedDim]++;
       int i;
       for (i = 0; i < count; ) {
@@ -865,7 +922,7 @@ public class BKDReader extends PointValues {
           for (int dim = 0; dim < config.numDims; dim++) {
             int prefix = commonPrefixLengths[dim];
             in.readBytes(
-                scratchPackedValue, dim * config.bytesPerDim + prefix, config.bytesPerDim - prefix);
+                    scratchPackedValue, dim * config.bytesPerDim + prefix, config.bytesPerDim - prefix);
           }
           visitor.visit(scratchIterator.docIDs[i + j], scratchPackedValue);
         }
@@ -873,22 +930,22 @@ public class BKDReader extends PointValues {
       }
       if (i != count) {
         throw new CorruptIndexException(
-            "Sub blocks do not add up to the expected count: " + count + " != " + i, in);
+                "Sub blocks do not add up to the expected count: " + count + " != " + i, in);
       }
     }
 
     private int readCompressedDim(IndexInput in) throws IOException {
       int compressedDim = in.readByte();
       if (compressedDim < -2
-          || compressedDim >= config.numDims
-          || (version < BKDWriter.VERSION_LOW_CARDINALITY_LEAVES && compressedDim == -2)) {
+              || compressedDim >= config.numDims
+              || (version < BKDWriter.VERSION_LOW_CARDINALITY_LEAVES && compressedDim == -2)) {
         throw new CorruptIndexException("Got compressedDim=" + compressedDim, in);
       }
       return compressedDim;
     }
 
     private void readCommonPrefixes(
-        int[] commonPrefixLengths, byte[] scratchPackedValue, IndexInput in) throws IOException {
+            int[] commonPrefixLengths, byte[] scratchPackedValue, IndexInput in) throws IOException {
       for (int dim = 0; dim < config.numDims; dim++) {
         int prefix = in.readVInt();
         commonPrefixLengths[dim] = prefix;
