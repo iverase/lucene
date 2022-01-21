@@ -17,12 +17,12 @@
 package org.apache.lucene.util.bkd;
 
 import java.io.IOException;
-
-import org.apache.lucene.index.PointValues;
 import org.apache.lucene.store.DataInput;
 import org.apache.lucene.store.DataOutput;
 
 final class BKDForUtil {
+
+  static final int BLOCK_SIZE = 512;
 
   private final int[] tmp;
 
@@ -93,8 +93,8 @@ final class BKDForUtil {
     }
     for (int i = 0; i < quarterLen; i++) {
       ints[i + quarterLen3] =
-              ((tmp[i] << 16) & 0xFFFFFF)
-                      | ((tmp[i + quarterLen] << 8) & 0xFFFF)
+              ((tmp[i] & 0xFF) << 16)
+                      | ((tmp[i + quarterLen] & 0xFF) << 8)
                       | (tmp[i + quarterLen * 2] & 0xFF);
     }
     in.readInts(ints, quarterLen << 2, len & 0x3);

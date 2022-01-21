@@ -97,7 +97,7 @@ final class DocIdsWriter {
   }
 
   private static void writeIdsAsBitSet(int[] docIds, int start, int count, DataOutput out)
-      throws IOException {
+          throws IOException {
     int min = docIds[start];
     int max = docIds[start + count - 1];
 
@@ -132,7 +132,6 @@ final class DocIdsWriter {
   /** Read {@code count} integers into {@code docIDs}. */
   void readInts(IndexInput in, int count, int[] docIDs) throws IOException {
     final int bpv = in.readByte();
-    //System.out.println("docs " + bpv + " " + count);
     switch (bpv) {
       case CONTINUOUS_IDS:
         readContinuousIds(in, count, docIDs);
@@ -199,7 +198,7 @@ final class DocIdsWriter {
   }
 
   private static void readLegacyDeltaVInts(IndexInput in, int count, int[] docIDs)
-      throws IOException {
+          throws IOException {
     int doc = 0;
     for (int i = 0; i < count; i++) {
       doc += in.readVInt();
@@ -233,7 +232,6 @@ final class DocIdsWriter {
    */
   void readInts(IndexInput in, int count, IntersectVisitor visitor) throws IOException {
     final int bpv = in.readByte();
-    //System.out.println("visitor " + bpv + " " + count);
     switch (bpv) {
       case CONTINUOUS_IDS:
         readContinuousIds(in, count, visitor);
@@ -262,7 +260,7 @@ final class DocIdsWriter {
   }
 
   private static void readLegacyDeltaVInts(IndexInput in, int count, IntersectVisitor visitor)
-      throws IOException {
+          throws IOException {
     int doc = 0;
     for (int i = 0; i < count; i++) {
       doc += in.readVInt();
@@ -271,7 +269,7 @@ final class DocIdsWriter {
   }
 
   private static void readLegacyInts24(IndexInput in, int count, IntersectVisitor visitor)
-      throws IOException {
+          throws IOException {
     int i;
     for (i = 0; i < count - 7; i += 8) {
       long l1 = in.readLong();
@@ -292,13 +290,13 @@ final class DocIdsWriter {
   }
 
   private static void readBitSet(IndexInput in, int count, IntersectVisitor visitor)
-      throws IOException {
+          throws IOException {
     DocIdSetIterator bitSetIterator = readBitSetIterator(in, count);
     visitor.visit(bitSetIterator);
   }
 
   private static void readContinuousIds(IndexInput in, int count, IntersectVisitor visitor)
-      throws IOException {
+          throws IOException {
     int start = in.readVInt();
     int extra = start & 63;
     int offset = start - extra;
