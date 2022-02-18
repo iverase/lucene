@@ -89,6 +89,8 @@ API Changes
 * LUCENE-10420: Move functional interfaces in IOUtils to top-level interfaces.
   (David Smiley, Uwe Schindler, Dawid Weiss, Tomoko Uchida)
 
+* LUCENE-10398: Add static method for getting Terms from LeafReader. (Spike Liu)
+
 New Features
 ---------------------
 
@@ -156,6 +158,9 @@ New Features
 
 * LUCENE-10415: FunctionScoreQuery and IndexOrDocValuesQuery delegate Weight#count. (Ignacio Vera)     
 
+* LUCENE-10382: Add support for filtering in KnnVectorQuery. This allows for finding the
+  nearest k documents that also match a query. (Julie Tibshirani, Joel Bernstein)
+
 Improvements
 ---------------------
 
@@ -221,6 +226,11 @@ Optimizations
 
 * LUCENE-10412: More `Query#rewrite` optimizations for MatchNoDocsQuery.
   (Adrien Grand)
+
+* LUCENE-10408 Better encoding of doc Ids in vectors. (Mayya Sharipova, Julie Tibshirani, Adrien Grand)
+
+* LUCENE-10084: Rewrite DocValuesFieldExistsQuery to MatchAllDocsQuery whenever terms
+  or points have a docCount that is equal to maxDoc. (Vigya Sharma)
 
 Changes in runtime behavior
 ---------------------
