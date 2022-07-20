@@ -54,18 +54,17 @@ public final class Version {
 
   /**
    * Match settings and bugs in Lucene's 9.3.0 release.
-   * 
+   *
    * @deprecated (9.4.0) Use latest
    */
-  @Deprecated
-  public static final Version LUCENE_9_3_0 = new Version(9, 3, 0);
+  @Deprecated public static final Version LUCENE_9_3_0 = new Version(9, 3, 0);
 
   /**
    * Match settings and bugs in Lucene's 9.4.0 release.
    *
    * @deprecated (10.0.0) Use latest
    */
-  public static final Version LUCENE_9_4_0 = new Version(9, 4, 0);
+  @Deprecated public static final Version LUCENE_9_4_0 = new Version(9, 4, 0);
 
   /**
    * Match settings and bugs in Lucene's 10.0.0 release.
@@ -119,7 +118,7 @@ public final class Version {
     StrictStringTokenizer tokens = new StrictStringTokenizer(version, '.');
     if (tokens.hasMoreTokens() == false) {
       throw new ParseException(
-              "Version is not in form major.minor.bugfix(.prerelease) (got: " + version + ")", 0);
+          "Version is not in form major.minor.bugfix(.prerelease) (got: " + version + ")", 0);
     }
 
     int major;
@@ -128,15 +127,15 @@ public final class Version {
       major = Integer.parseInt(token);
     } catch (NumberFormatException nfe) {
       ParseException p =
-              new ParseException(
-                      "Failed to parse major version from \"" + token + "\" (got: " + version + ")", 0);
+          new ParseException(
+              "Failed to parse major version from \"" + token + "\" (got: " + version + ")", 0);
       p.initCause(nfe);
       throw p;
     }
 
     if (tokens.hasMoreTokens() == false) {
       throw new ParseException(
-              "Version is not in form major.minor.bugfix(.prerelease) (got: " + version + ")", 0);
+          "Version is not in form major.minor.bugfix(.prerelease) (got: " + version + ")", 0);
     }
 
     int minor;
@@ -145,8 +144,8 @@ public final class Version {
       minor = Integer.parseInt(token);
     } catch (NumberFormatException nfe) {
       ParseException p =
-              new ParseException(
-                      "Failed to parse minor version from \"" + token + "\" (got: " + version + ")", 0);
+          new ParseException(
+              "Failed to parse minor version from \"" + token + "\" (got: " + version + ")", 0);
       p.initCause(nfe);
       throw p;
     }
@@ -160,8 +159,8 @@ public final class Version {
         bugfix = Integer.parseInt(token);
       } catch (NumberFormatException nfe) {
         ParseException p =
-                new ParseException(
-                        "Failed to parse bugfix version from \"" + token + "\" (got: " + version + ")", 0);
+            new ParseException(
+                "Failed to parse bugfix version from \"" + token + "\" (got: " + version + ")", 0);
         p.initCause(nfe);
         throw p;
       }
@@ -172,30 +171,30 @@ public final class Version {
           prerelease = Integer.parseInt(token);
         } catch (NumberFormatException nfe) {
           ParseException p =
-                  new ParseException(
-                          "Failed to parse prerelease version from \""
-                                  + token
-                                  + "\" (got: "
-                                  + version
-                                  + ")",
-                          0);
+              new ParseException(
+                  "Failed to parse prerelease version from \""
+                      + token
+                      + "\" (got: "
+                      + version
+                      + ")",
+                  0);
           p.initCause(nfe);
           throw p;
         }
         if (prerelease == 0) {
           throw new ParseException(
-                  "Invalid value "
-                          + prerelease
-                          + " for prerelease; should be 1 or 2 (got: "
-                          + version
-                          + ")",
-                  0);
+              "Invalid value "
+                  + prerelease
+                  + " for prerelease; should be 1 or 2 (got: "
+                  + version
+                  + ")",
+              0);
         }
 
         if (tokens.hasMoreTokens()) {
           // Too many tokens!
           throw new ParseException(
-                  "Version is not in form major.minor.bugfix(.prerelease) (got: " + version + ")", 0);
+              "Version is not in form major.minor.bugfix(.prerelease) (got: " + version + ")", 0);
         }
       }
     }
@@ -204,8 +203,8 @@ public final class Version {
       return new Version(major, minor, bugfix, prerelease);
     } catch (IllegalArgumentException iae) {
       ParseException pe =
-              new ParseException(
-                      "failed to parse version string \"" + version + "\": " + iae.getMessage(), 0);
+          new ParseException(
+              "failed to parse version string \"" + version + "\": " + iae.getMessage(), 0);
       pe.initCause(iae);
       throw pe;
     }
@@ -228,20 +227,20 @@ public final class Version {
         return LATEST;
       default:
         version =
-                version
-                        .replaceFirst("^LUCENE_(\\d+)_(\\d+)_(\\d+)$", "$1.$2.$3")
-                        .replaceFirst("^LUCENE_(\\d+)_(\\d+)$", "$1.$2.0")
-                        .replaceFirst("^LUCENE_(\\d)(\\d)$", "$1.$2.0");
+            version
+                .replaceFirst("^LUCENE_(\\d+)_(\\d+)_(\\d+)$", "$1.$2.$3")
+                .replaceFirst("^LUCENE_(\\d+)_(\\d+)$", "$1.$2.0")
+                .replaceFirst("^LUCENE_(\\d)(\\d)$", "$1.$2.0");
         try {
           return parse(version);
         } catch (ParseException pe) {
           ParseException pe2 =
-                  new ParseException(
-                          "failed to parse lenient version string \""
-                                  + versionOrig
-                                  + "\": "
-                                  + pe.getMessage(),
-                          0);
+              new ParseException(
+                  "failed to parse lenient version string \""
+                      + versionOrig
+                      + "\": "
+                      + pe.getMessage(),
+                  0);
           pe2.initCause(pe);
           throw pe2;
         }
@@ -296,13 +295,13 @@ public final class Version {
     }
     if (prerelease != 0 && (minor != 0 || bugfix != 0)) {
       throw new IllegalArgumentException(
-              "Prerelease version only supported with major release (got prerelease: "
-                      + prerelease
-                      + ", minor: "
-                      + minor
-                      + ", bugfix: "
-                      + bugfix
-                      + ")");
+          "Prerelease version only supported with major release (got prerelease: "
+              + prerelease
+              + ", minor: "
+              + minor
+              + ", bugfix: "
+              + bugfix
+              + ")");
     }
 
     encodedValue = major << 18 | minor << 10 | bugfix << 2 | prerelease;
