@@ -37,7 +37,9 @@ public class TestKMeans extends LuceneTestCase {
     // default case
     {
       KMeans.Results results = KMeans.cluster(vectors, similarityFunction, nClusters);
+      assertResults(results, nClusters, nVectors, true);
       assertEquals(nClusters, results.centroids().length);
+      assertEquals(nClusters, results.centroidsSize().length);
       assertEquals(nVectors, results.vectorCentroids().length);
     }
     // expert case
@@ -61,12 +63,23 @@ public class TestKMeans extends LuceneTestCase {
               restarts,
               iters,
               sampleSize);
-      assertEquals(nClusters, results.centroids().length);
-      if (assignCentroidsToVectors) {
-        assertEquals(nVectors, results.vectorCentroids().length);
-      } else {
-        assertNull(results.vectorCentroids());
+      assertResults(results, nClusters, nVectors, assignCentroidsToVectors);
+    }
+  }
+
+  private void assertResults(
+      KMeans.Results results, int nClusters, int nVectors, boolean assignCentroidsToVectors) {
+    assertEquals(nClusters, results.centroids().length);
+    if (assignCentroidsToVectors) {
+      assertEquals(nClusters, results.centroidsSize().length);
+      assertEquals(nVectors, results.vectorCentroids().length);
+      int[] centroidsSize = new int[nClusters];
+      for (int i = 0; i < nVectors; i++) {
+        centroidsSize[results.vectorCentroids()[i]]++;
       }
+      assertArrayEquals(centroidsSize, results.centroidsSize());
+    } else {
+      assertNull(results.vectorCentroids());
     }
   }
 
@@ -101,8 +114,7 @@ public class TestKMeans extends LuceneTestCase {
               1,
               2,
               sampleSize);
-      assertEquals(nClusters, results.centroids().length);
-      assertEquals(nVectors, results.vectorCentroids().length);
+      assertResults(results, nClusters, nVectors, true);
     }
     {
       // test unassigned centroids
@@ -116,6 +128,21 @@ public class TestKMeans extends LuceneTestCase {
       KMeans.assignCentroids(vectors, centroids, unassignedIdxs);
       assertEquals(nClusters, centroids.length);
     }
+  }
+
+  public void testKMeansSAllZero() throws IOException {
+    int nClusters = 10;
+    List<float[]> vectors = new ArrayList<>();
+    for (int i = 0; i < 1000; i++) {
+      float[] vector = new float[5];
+      vectors.add(vector);
+    }
+    KMeans.Results results =
+        KMeans.cluster(
+            FloatVectorValues.fromFloats(vectors, 5),
+            VectorSimilarityFunction.EUCLIDEAN,
+            nClusters);
+    assertResults(results, nClusters, 1000, true);
   }
 
   private static FloatVectorValues generateData(int nSamples, int nDims, int nClusters) {

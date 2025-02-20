@@ -130,13 +130,16 @@ public class KMeans {
     }
 
     short[] vectorCentroids = null;
+    int[] centroidSize = null;
     // Assign each vector to the nearest centroid and update the centres
     if (assignCentroidsToVectors) {
       vectorCentroids = new short[vectors.size()];
+      centroidSize = new int[centroids.length];
       // Use kahan summation to get more precise results
-      KMeans.runKMeansStep(vectors, centroids, vectorCentroids, true, normalizeCenters);
+      KMeans.runKMeansStep(
+          vectors, centroids, centroidSize, vectorCentroids, true, normalizeCenters);
     }
-    return new Results(centroids, vectorCentroids);
+    return new Results(centroids, centroidSize, vectorCentroids);
   }
 
   private KMeans(
@@ -169,12 +172,16 @@ public class KMeans {
             case PLUS_PLUS -> initializePlusPlus();
           };
       double prevSquaredDist = Double.MAX_VALUE;
+      int[] centroidSize = new int[centroids.length];
       for (int iter = 0; iter < iters; iter++) {
-        squaredDist = runKMeansStep(vectors, centroids, vectorCentroids, false, normalizeCenters);
+        squaredDist =
+            runKMeansStep(
+                vectors, centroids, centroidSize, vectorCentroids, false, normalizeCenters);
         // Check for convergence
         if (prevSquaredDist <= (squaredDist + 1e-6)) {
           break;
         }
+        Arrays.fill(centroidSize, 0);
         prevSquaredDist = squaredDist;
       }
       if (squaredDist < minSquaredDist) {
@@ -246,7 +253,7 @@ public class KMeans {
       // Randomly select next centroid
       double r = totalSum * random.nextDouble();
       double cumulativeSum = 0;
-      int nextCentroidIndex = -1;
+      int nextCentroidIndex = 0;
       for (int j = 0; j < numVectors; j++) {
         cumulativeSum += minDistances[j];
         if (cumulativeSum >= r && minDistances[j] > 0) {
@@ -276,14 +283,14 @@ public class KMeans {
   private static double runKMeansStep(
       FloatVectorValues vectors,
       float[][] centroids,
+      int[] centroidSize,
       short[] docCentroids,
       boolean useKahanSummation,
       boolean normalizeCentroids)
       throws IOException {
     short numCentroids = (short) centroids.length;
-
+    assert Arrays.stream(centroidSize).allMatch(size -> size == 0);
     float[][] newCentroids = new float[numCentroids][centroids[0].length];
-    int[] newCentroidSize = new int[numCentroids];
     float[][] compensations = null;
     if (useKahanSummation) {
       compensations = new float[numCentroids][centroids[0].length];
@@ -306,7 +313,7 @@ public class KMeans {
         sumSquaredDist += minSquaredDist;
       }
 
-      newCentroidSize[bestCentroid] += 1;
+      centroidSize[bestCentroid] += 1;
       for (int dim = 0; dim < vector.length; dim++) {
         if (useKahanSummation) {
           float y = vector[dim] - compensations[bestCentroid][dim];
@@ -322,9 +329,9 @@ public class KMeans {
 
     List<Integer> unassignedCentroids = new ArrayList<>();
     for (int c = 0; c < numCentroids; c++) {
-      if (newCentroidSize[c] > 0) {
+      if (centroidSize[c] > 0) {
         for (int dim = 0; dim < newCentroids[c].length; dim++) {
-          centroids[c][dim] = newCentroids[c][dim] / newCentroidSize[c];
+          centroids[c][dim] = newCentroids[c][dim] / centroidSize[c];
         }
       } else {
         unassignedCentroids.add(c);
@@ -338,6 +345,7 @@ public class KMeans {
         VectorUtil.l2normalize(centroids[c], false);
       }
     }
+    assert Arrays.stream(centroidSize).sum() == vectors.size();
     return sumSquaredDist;
   }
 
@@ -386,5 +394,5 @@ public class KMeans {
    *     expect less than {@code MAX_NUM_CENTROIDS} which is equal to 32767 centroids. Can be {@code
    *     null} if they were not computed.
    */
-  public record Results(float[][] centroids, short[] vectorCentroids) {}
+  public record Results(float[][] centroids, int[] centroidsSize, short[] vectorCentroids) {}
 }
