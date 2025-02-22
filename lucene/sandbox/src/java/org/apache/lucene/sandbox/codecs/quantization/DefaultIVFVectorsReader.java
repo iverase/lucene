@@ -66,7 +66,7 @@ public class DefaultIVFVectorsReader extends IVFVectorsReader {
       for (PostingListWithFileOffset PostingListWithFileOffset : centroidAndOffset) {
         float score =
             fieldInfo.getVectorSimilarityFunction().compare(PostingListWithFileOffset.centroid(), target);
-        pq.add(new PostingListWithFileOffsetWithScore(PostingListWithFileOffset, score));
+        pq.insertWithOverflow(new PostingListWithFileOffsetWithScore(PostingListWithFileOffset, score));
       }
 
       final PostingListWithFileOffsetWithScore[] topCentroids = new PostingListWithFileOffsetWithScore[postingListsToScore];
