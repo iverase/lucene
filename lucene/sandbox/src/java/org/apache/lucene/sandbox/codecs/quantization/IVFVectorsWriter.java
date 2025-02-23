@@ -246,7 +246,7 @@ public abstract class IVFVectorsWriter extends KnnVectorsWriter {
       public float[] vectorValue(int ord) throws IOException {
         for (int i = 0; i < vector.length; i++) {
           vector[i] =
-              Float.intBitsToFloat(randomAccessInput.readInt(ord * length + i * Float.BYTES));
+              Float.intBitsToFloat(randomAccessInput.readInt(ord * length + Integer.BYTES + i * Float.BYTES));
         }
         return vector;
       }
